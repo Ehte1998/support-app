@@ -13,17 +13,30 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "axios": "^1.12.1",
+    "axios": "^1.12.2",
+    "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.1",
+    "dotenv": "^17.2.2",
     "express": "^5.1.0",
-    "mongoose": "^8.18.0",
-    "nodemailer": "^7.0.6",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.18.1",
     "razorpay": "^2.9.6",
     "simple-peer": "^9.11.1",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "validator": "^13.15.15"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ehte1998/support-app.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Ehte1998/support-app/issues"
+  },
+  "homepage": "https://github.com/Ehte1998/support-app#readme"
 }
