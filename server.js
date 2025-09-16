@@ -15,7 +15,11 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: process.env.NODE_ENV === 'production' 
-      ? process.env.FRONTEND_URL 
+      ? [
+          "https://support-app-2.vercel.app", 
+          process.env.FRONTEND_URL,
+          "https://support-app-1-m6kf.onrender.com"
+        ]
       : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
     credentials: true
   }
@@ -33,7 +37,11 @@ const razorpay = new Razorpay({
 // Middleware
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? process.env.FRONTEND_URL 
+    ? [
+        "https://support-app-2.vercel.app", 
+        process.env.FRONTEND_URL,
+        "https://support-app-1-m6kf.onrender.com"
+      ]
     : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
   credentials: true
 }));
