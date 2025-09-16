@@ -14,25 +14,15 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
-      
-      const allowedOrigins = process.env.NODE_ENV === 'production' 
-        ? [
-            "https://support-app-2.vercel.app",
-            process.env.FRONTEND_URL,
-            "https://support-app-1-m6kf.onrender.com"
-          ]
-        : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"];
-      
-      if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
-        return callback(null, true);
-      }
-      
-      callback(new Error('Not allowed by CORS'));
-    },
-    credentials: true
-  }
+    origin: process.env.NODE_ENV === 'production' 
+      ? [
+          "https://support-app-2.vercel.app", 
+          process.env.FRONTEND_URL,
+          "https://support-app-1-m6kf.onrender.com"
+        ]
+      : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    credentials: true
+  }
 });
 
 // JWT Secret
@@ -46,27 +36,14 @@ const razorpay = new Razorpay({
 
 // Middleware
 app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, etc)
-    if (!origin) return callback(null, true);
-    
-    const allowedOrigins = process.env.NODE_ENV === 'production' 
-      ? [
-          "https://support-app-2.vercel.app",
-          process.env.FRONTEND_URL
-        ]
-      : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"];
-    
-    // Allow any Vercel deployment URL or specific allowed origins
-    if (allowedOrigins.includes(origin) || 
-        origin.endsWith('.vercel.app') || 
-        origin === "https://support-app-1-m6kf.onrender.com") {
-      return callback(null, true);
-    }
-    
-    callback(new Error('Not allowed by CORS'));
-  },
-  credentials: true
+  origin: process.env.NODE_ENV === 'production' 
+    ? [
+        "https://support-app-2.vercel.app", 
+        process.env.FRONTEND_URL,
+        "https://support-app-1-m6kf.onrender.com"
+      ]
+    : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+  credentials: true
 }));
 app.use(express.json());
 
@@ -811,7 +788,7 @@ app.patch('/api/messages/:id/user-meeting-links', authenticateUser, async (req, 
   }
 });
 
-// Create payment order
+// Create payment order - FIXED: Shortened receipt to avoid 40-character limit
 app.post('/api/create-payment-order', async (req, res) => {
   try {
     const { amount, messageId } = req.body;
@@ -822,12 +799,21 @@ app.post('/api/create-payment-order', async (req, res) => {
 
     const amountInPaise = Math.round(amount * 100);
     
+    // Fix: Create shorter receipt to stay under 40 characters
+    const shortId = messageId ? messageId.substring(messageId.length - 8) : 'guest';
+    const timestamp = Date.now().toString().slice(-8);
+    const receipt = `rcpt_${shortId}_${timestamp}`;
+    
+    console.log(`Creating payment order: Amount=${amount}, Receipt=${receipt} (${receipt.length} chars)`);
+    
     const order = await razorpay.orders.create({
       amount: amountInPaise,
       currency: 'INR',
-      receipt: `receipt_${messageId}_${Date.now()}`,
+      receipt: receipt,
       payment_capture: 1
     });
+
+    console.log(`Payment order created successfully: ${order.id}`);
 
     res.json({
       success: true,
@@ -854,12 +840,14 @@ app.post('/api/verify-payment', async (req, res) => {
 
     if (expectedSignature === razorpay_signature) {
       // Update message with payment info
-      await Message.findByIdAndUpdate(messageId, {
-        paymentStatus: 'paid',
-        paymentId: razorpay_payment_id,
-        amountPaid: amount / 100, // Convert from paise to rupees
-        paidAt: new Date()
-      });
+      if (messageId) {
+        await Message.findByIdAndUpdate(messageId, {
+          paymentStatus: 'paid',
+          paymentId: razorpay_payment_id,
+          amountPaid: amount / 100, // Convert from paise to rupees
+          paidAt: new Date()
+        });
+      }
 
       // Emit payment received event to admin
       io.emit('paymentReceived', {
@@ -958,6 +946,9 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Admin Dashboard: http://localhost:${PORT}/?admin`);
-  console.log(`User Interface: http://localhost:${PORT}/`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`Admin Dashboard: http://localhost:${PORT}/?admin`);
+    console.log(`User Interface: http://localhost:${PORT}/`);
+  }
 });
