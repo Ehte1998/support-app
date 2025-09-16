@@ -14,15 +14,25 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.NODE_ENV === 'production' 
-      ? [
-          "https://support-app-2.vercel.app", 
-          process.env.FRONTEND_URL,
-          "https://support-app-1-m6kf.onrender.com"
-        ]
-      : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
-    credentials: true
-  }
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+      
+      const allowedOrigins = process.env.NODE_ENV === 'production' 
+        ? [
+            "https://support-app-2.vercel.app",
+            process.env.FRONTEND_URL,
+            "https://support-app-1-m6kf.onrender.com"
+          ]
+        : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"];
+      
+      if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+        return callback(null, true);
+      }
+      
+      callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true
+  }
 });
 
 // JWT Secret
@@ -36,14 +46,27 @@ const razorpay = new Razorpay({
 
 // Middleware
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? [
-        "https://support-app-2.vercel.app", 
-        process.env.FRONTEND_URL,
-        "https://support-app-1-m6kf.onrender.com"
-      ]
-    : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
-  credentials: true
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, etc)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = process.env.NODE_ENV === 'production' 
+      ? [
+          "https://support-app-2.vercel.app",
+          process.env.FRONTEND_URL
+        ]
+      : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"];
+    
+    // Allow any Vercel deployment URL or specific allowed origins
+    if (allowedOrigins.includes(origin) || 
+        origin.endsWith('.vercel.app') || 
+        origin === "https://support-app-1-m6kf.onrender.com") {
+      return callback(null, true);
+    }
+    
+    callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true
 }));
 app.use(express.json());
 
