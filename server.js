@@ -16,7 +16,7 @@ const server = http.createServer(app);
 // Flexible CORS configuration function
 const corsOriginHandler = (origin, callback) => {
   // Allow requests with no origin (mobile apps, curl, etc.)
-  if (!origin) return callback(null, true);
+  if (!origin) return callback(new Error('Not allowed by CORS'));
   
   const allowedOrigins = process.env.NODE_ENV === 'production' 
     ? [
@@ -30,10 +30,10 @@ const corsOriginHandler = (origin, callback) => {
   const isVercelPreview = origin.match(/^https:\/\/support-app-2-[a-zA-Z0-9-]+.*\.vercel\.app$/);
   
   if (allowedOrigins.includes(origin) || isVercelPreview) {
-    callback(null, true);
+    callback(new Error('Not allowed by CORS'));
   } else {
     console.log('CORS blocked origin:', origin);
-    callback(null, true); // For debugging, allow all origins temporarily
+    callback(new Error('Not allowed by CORS')); // For debugging, allow all origins temporarily
     // Change to: callback(new Error('Not allowed by CORS')); once you confirm it works
   }
 };
