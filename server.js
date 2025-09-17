@@ -14,28 +14,40 @@ const app = express();
 const server = http.createServer(app);
 
 // Flexible CORS configuration function
+// Replace the corsOriginHandler function in your server.js with this version:
+
 const corsOriginHandler = (origin, callback) => {
+  console.log('CORS request from origin:', origin);
+  
+  // For now, allow all origins to debug the payment issue
+  // We'll tighten this later once payments work
+  callback(null, true);
+  
+  /* 
+  // This is the secure version we'll use later:
+  
   // Allow requests with no origin (mobile apps, curl, etc.)
-  if (!origin) return callback(new Error('Not allowed by CORS'));
+  if (!origin) return callback(null, true);
   
   const allowedOrigins = process.env.NODE_ENV === 'production' 
     ? [
         "https://support-app-2.vercel.app",
         process.env.FRONTEND_URL,
         "https://support-app-1-m6kf.onrender.com"
-      ].filter(Boolean) // Remove any undefined values
+      ].filter(Boolean)
     : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"];
   
-  // Allow all Vercel preview deployments for your app
+  // Allow all Vercel preview deployments
   const isVercelPreview = origin.match(/^https:\/\/support-app-2-[a-zA-Z0-9-]+.*\.vercel\.app$/);
   
   if (allowedOrigins.includes(origin) || isVercelPreview) {
-    callback(new Error('Not allowed by CORS'));
+    console.log('CORS allowed for origin:', origin);
+    callback(null, true);
   } else {
     console.log('CORS blocked origin:', origin);
-    callback(null, true); // For debugging, allow all origins temporarily
-    // Change to: callback(new Error('Not allowed by CORS')); once you confirm it works
+    callback(new Error('Not allowed by CORS'));
   }
+  */
 };
 
 // Socket.IO with flexible CORS
