@@ -33,7 +33,7 @@ const corsOriginHandler = (origin, callback) => {
     callback(new Error('Not allowed by CORS'));
   } else {
     console.log('CORS blocked origin:', origin);
-    callback(new Error('Not allowed by CORS')); // For debugging, allow all origins temporarily
+    callback(null, true); // For debugging, allow all origins temporarily
     // Change to: callback(new Error('Not allowed by CORS')); once you confirm it works
   }
 };
