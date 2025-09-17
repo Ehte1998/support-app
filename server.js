@@ -12,15 +12,36 @@ require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
+
+// Flexible CORS configuration function
+const corsOriginHandler = (origin, callback) => {
+  // Allow requests with no origin (mobile apps, curl, etc.)
+  if (!origin) return callback(null, true);
+  
+  const allowedOrigins = process.env.NODE_ENV === 'production' 
+    ? [
+        "https://support-app-2.vercel.app",
+        process.env.FRONTEND_URL,
+        "https://support-app-1-m6kf.onrender.com"
+      ].filter(Boolean) // Remove any undefined values
+    : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"];
+  
+  // Allow all Vercel preview deployments for your app
+  const isVercelPreview = origin.match(/^https:\/\/support-app-2-[a-zA-Z0-9-]+.*\.vercel\.app$/);
+  
+  if (allowedOrigins.includes(origin) || isVercelPreview) {
+    callback(null, true);
+  } else {
+    console.log('CORS blocked origin:', origin);
+    callback(null, true); // For debugging, allow all origins temporarily
+    // Change to: callback(new Error('Not allowed by CORS')); once you confirm it works
+  }
+};
+
+// Socket.IO with flexible CORS
 const io = new Server(server, {
   cors: {
-    origin: process.env.NODE_ENV === 'production' 
-      ? [
-          "https://support-app-2.vercel.app", 
-          process.env.FRONTEND_URL,
-          "https://support-app-1-m6kf.onrender.com"
-        ]
-      : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    origin: corsOriginHandler,
     credentials: true
   }
 });
@@ -34,17 +55,12 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET
 });
 
-// Middleware
+// Middleware - Express CORS
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? [
-        "https://support-app-2.vercel.app", 
-        process.env.FRONTEND_URL,
-        "https://support-app-1-m6kf.onrender.com"
-      ]
-    : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+  origin: corsOriginHandler,
   credentials: true
 }));
+
 app.use(express.json());
 
 // MongoDB Connection
@@ -792,6 +808,8 @@ app.patch('/api/messages/:id/user-meeting-links', authenticateUser, async (req, 
 app.post('/api/create-payment-order', async (req, res) => {
   try {
     const { amount, messageId } = req.body;
+
+    console.log('Creating payment order:', { amount, messageId });
 
     if (!amount || amount < 1) {
       return res.status(400).json({ success: false, error: 'Valid amount is required' });
