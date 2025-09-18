@@ -14,8 +14,6 @@ const app = express();
 const server = http.createServer(app);
 
 // Flexible CORS configuration function
-// Replace the corsOriginHandler function in your server.js with this version:
-
 const corsOriginHandler = (origin, callback) => {
   console.log('CORS request from origin:', origin);
   
@@ -855,6 +853,168 @@ app.post('/api/create-payment-order', async (req, res) => {
   } catch (error) {
     console.error('Payment order creation error:', error);
     res.status(500).json({ success: false, error: 'Failed to create payment order' });
+  }
+});
+
+// Mobile Payment Redirect Endpoint - NEW ADDITION
+app.get('/api/payment/razorpay', async (req, res) => {
+  try {
+    const { orderId, amount, messageId } = req.query;
+    
+    if (!orderId) {
+      return res.status(400).send('Order ID is required');
+    }
+
+    // Create a simple HTML page that opens Razorpay
+    const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Payment</title>
+        <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body { 
+                font-family: Arial, sans-serif; 
+                text-align: center; 
+                padding: 50px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                min-height: 100vh;
+                margin: 0;
+            }
+            .container {
+                background: white;
+                color: black;
+                padding: 30px;
+                border-radius: 10px;
+                max-width: 400px;
+                margin: 0 auto;
+            }
+            .btn {
+                background: #3b82f6;
+                color: white;
+                border: none;
+                padding: 15px 30px;
+                font-size: 16px;
+                border-radius: 5px;
+                cursor: pointer;
+                margin: 10px;
+            }
+            .amount {
+                font-size: 24px;
+                font-weight: bold;
+                color: #10b981;
+                margin: 20px 0;
+            }
+            .loading {
+                display: inline-block;
+                width: 20px;
+                height: 20px;
+                border: 3px solid #f3f3f3;
+                border-top: 3px solid #3b82f6;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+            }
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h2>Payment Gateway</h2>
+            <div class="amount">Amount: ₹${amount || 'N/A'}</div>
+            <p>Click the button below to complete your payment</p>
+            <button id="payButton" class="btn">Pay Now</button>
+            <br>
+            <button onclick="window.close()" class="btn" style="background: #6b7280;">Cancel</button>
+            <div id="status" style="margin-top: 20px; font-size: 14px; color: #666;"></div>
+        </div>
+
+        <script>
+            function setStatus(message, isError = false) {
+                const statusEl = document.getElementById('status');
+                statusEl.innerHTML = message;
+                statusEl.style.color = isError ? '#dc2626' : '#059669';
+            }
+
+            document.getElementById('payButton').onclick = function() {
+                setStatus('<div class="loading"></div> Opening payment gateway...');
+                
+                const options = {
+                    key: '${process.env.RAZORPAY_KEY_ID}',
+                    amount: ${amount ? amount * 100 : 0},
+                    currency: 'INR',
+                    name: 'Support Counseling',
+                    description: 'Counseling Session Payment',
+                    order_id: '${orderId}',
+                    handler: function (response) {
+                        setStatus('<div class="loading"></div> Verifying payment...');
+                        
+                        // Send verification request
+                        fetch('/api/verify-payment', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                razorpay_order_id: response.razorpay_order_id,
+                                razorpay_payment_id: response.razorpay_payment_id,
+                                razorpay_signature: response.razorpay_signature,
+                                messageId: '${messageId}',
+                                amount: ${amount ? amount * 100 : 0}
+                            })
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                setStatus('✅ Payment successful! You can close this window.');
+                                setTimeout(() => {
+                                    window.close();
+                                }, 3000);
+                            } else {
+                                setStatus('❌ Payment verification failed. Please contact support.', true);
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Verification error:', error);
+                            setStatus('❌ Payment verification failed. Please contact support.', true);
+                        });
+                    },
+                    prefill: {
+                        name: 'User'
+                    },
+                    theme: {
+                        color: '#3b82f6'
+                    },
+                    modal: {
+                        ondismiss: function() {
+                            setStatus('Payment cancelled');
+                        }
+                    }
+                };
+                
+                if (window.Razorpay) {
+                    const rzp = new window.Razorpay(options);
+                    rzp.open();
+                } else {
+                    setStatus('❌ Payment gateway not available. Please try again.', true);
+                }
+            };
+
+            // Auto-trigger payment on page load for better UX
+            setTimeout(() => {
+                document.getElementById('payButton').click();
+            }, 1000);
+        </script>
+    </body>
+    </html>
+    `;
+
+    res.send(html);
+  } catch (error) {
+    console.error('Payment page error:', error);
+    res.status(500).send('Payment page error');
   }
 });
 
