@@ -856,30 +856,10 @@ app.post('/api/create-payment-order', async (req, res) => {
   }
 });
 
-// Delete message/conversation (admin only)
-app.delete('/api/messages/:id', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    const message = await Message.findByIdAndDelete(id);
-    
-    if (!message) {
-      return res.status(404).json({ error: 'Message not found' });
-    }
+// CRITICAL FIX: Bulk delete route MUST come BEFORE individual delete route
+// This prevents Express from matching "bulk-delete" as an ID parameter
 
-    console.log(`Admin deleted message ${id}`);
-    
-    res.json({ 
-      success: true, 
-      message: 'Conversation deleted successfully' 
-    });
-  } catch (error) {
-    console.error('Error deleting message:', error);
-    res.status(500).json({ error: 'Failed to delete conversation' });
-  }
-});
-
-// Bulk delete messages (admin only)
+// Bulk delete messages (admin only) - MUST COME FIRST
 app.delete('/api/messages/bulk-delete', authenticate, async (req, res) => {
   try {
     const { messageIds } = req.body;
@@ -900,6 +880,36 @@ app.delete('/api/messages/bulk-delete', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Error bulk deleting messages:', error);
     res.status(500).json({ error: 'Failed to delete conversations' });
+  }
+});
+
+// Delete message/conversation (admin only) - MUST COME AFTER bulk-delete
+app.delete('/api/messages/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    console.log(`Attempting to delete message: ${id}`);
+    
+    // Validate ObjectId format
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ error: 'Invalid message ID format' });
+    }
+    
+    const message = await Message.findByIdAndDelete(id);
+    
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    console.log(`Admin deleted message ${id}`);
+    
+    res.json({ 
+      success: true, 
+      message: 'Conversation deleted successfully' 
+    });
+  } catch (error) {
+    console.error('Error deleting message:', error);
+    res.status(500).json({ error: 'Failed to delete conversation' });
   }
 });
 
