@@ -14,28 +14,24 @@ const app = express();
 const server = http.createServer(app);
 
 // Flexible CORS configuration function
+// Updated CORS configuration with your new domain
 const corsOriginHandler = (origin, callback) => {
   console.log('CORS request from origin:', origin);
-  
-  // For now, allow all origins to debug the payment issue
-  // We'll tighten this later once payments work
-  callback(null, true);
-  
-  /* 
-  // This is the secure version we'll use later:
   
   // Allow requests with no origin (mobile apps, curl, etc.)
   if (!origin) return callback(null, true);
   
   const allowedOrigins = process.env.NODE_ENV === 'production' 
     ? [
-        "https://support-app-2.vercel.app",
+        "https://ehtecounseling.com",
+        "https://www.ehtecounseling.com", // if you plan to use www
         process.env.FRONTEND_URL,
-        "https://support-app-1-m6kf.onrender.com"
+        // Keep old domains temporarily during migration
+        "https://support-app-2.vercel.app", // remove after migration
       ].filter(Boolean)
     : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"];
   
-  // Allow all Vercel preview deployments
+  // Allow Vercel preview deployments temporarily
   const isVercelPreview = origin.match(/^https:\/\/support-app-2-[a-zA-Z0-9-]+.*\.vercel\.app$/);
   
   if (allowedOrigins.includes(origin) || isVercelPreview) {
@@ -45,7 +41,6 @@ const corsOriginHandler = (origin, callback) => {
     console.log('CORS blocked origin:', origin);
     callback(new Error('Not allowed by CORS'));
   }
-  */
 };
 
 // Socket.IO with flexible CORS
