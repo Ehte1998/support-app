@@ -856,6 +856,53 @@ app.post('/api/create-payment-order', async (req, res) => {
   }
 });
 
+// Delete message/conversation (admin only)
+app.delete('/api/messages/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const message = await Message.findByIdAndDelete(id);
+    
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    console.log(`Admin deleted message ${id}`);
+    
+    res.json({ 
+      success: true, 
+      message: 'Conversation deleted successfully' 
+    });
+  } catch (error) {
+    console.error('Error deleting message:', error);
+    res.status(500).json({ error: 'Failed to delete conversation' });
+  }
+});
+
+// Bulk delete messages (admin only)
+app.delete('/api/messages/bulk-delete', authenticate, async (req, res) => {
+  try {
+    const { messageIds } = req.body;
+    
+    if (!messageIds || !Array.isArray(messageIds)) {
+      return res.status(400).json({ error: 'Message IDs array is required' });
+    }
+
+    const result = await Message.deleteMany({ _id: { $in: messageIds } });
+    
+    console.log(`Admin bulk deleted ${result.deletedCount} messages`);
+    
+    res.json({ 
+      success: true, 
+      message: `${result.deletedCount} conversations deleted successfully`,
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error('Error bulk deleting messages:', error);
+    res.status(500).json({ error: 'Failed to delete conversations' });
+  }
+});
+
 // Mobile Payment Redirect Endpoint - NEW ADDITION
 app.get('/api/payment/razorpay', async (req, res) => {
   try {
