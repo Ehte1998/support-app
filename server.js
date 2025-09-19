@@ -8,7 +8,6 @@ const Razorpay = require('razorpay');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-// ADD THESE NEW DEPENDENCIES FOR FILE UPLOAD
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -41,7 +40,6 @@ const storage = multer.diskStorage({
     cb(null, uploadsDir);
   },
   filename: function (req, file, cb) {
-    // Create unique filename with timestamp and random string
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const ext = path.extname(file.originalname);
     cb(null, file.fieldname + '-' + uniqueSuffix + ext);
@@ -49,7 +47,6 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  // Allow images and videos
   const allowedTypes = [
     'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
     'video/mp4', 'video/mov', 'video/avi', 'video/mkv', 'video/webm', 'video/3gp'
@@ -66,15 +63,14 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 4 * 1024 * 1024 * 1024, // 4GB limit
+    fileSize: 4 * 1024 * 1024 * 1024,
   }
 });
 
-// Flexible CORS configuration function
+// FIXED CORS CONFIGURATION
 const corsOriginHandler = (origin, callback) => {
   console.log('CORS request from origin:', origin);
   
-  // Allow requests with no origin (mobile apps, curl, etc.)
   if (!origin) {
     console.log('CORS allowed for request with no origin');
     return callback(null, true);
@@ -89,7 +85,6 @@ const corsOriginHandler = (origin, callback) => {
       ].filter(Boolean)
     : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"];
   
-  // Allow Vercel preview deployments
   const isVercelPreview = origin.match(/^https:\/\/support-app-2-[a-zA-Z0-9-]+.*\.vercel\.app$/);
   
   if (allowedOrigins.includes(origin) || isVercelPreview) {
@@ -97,12 +92,52 @@ const corsOriginHandler = (origin, callback) => {
     callback(null, true);
   } else {
     console.log('CORS blocked origin:', origin);
-    // Temporarily allow all origins for debugging
     callback(null, true);
   }
 };
 
-// Socket.IO with flexible CORS
+// ENHANCED CORS MIDDLEWARE
+app.use(cors({
+  origin: corsOriginHandler,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Origin',
+    'X-Requested-With',
+    'Content-Type',
+    'Accept',
+    'Authorization',
+    'Cache-Control',
+    'Pragma'
+  ],
+  optionsSuccessStatus: 204
+}));
+
+// EXPLICIT OPTIONS HANDLERS
+app.options('*', cors({
+  origin: corsOriginHandler,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'Cache-Control', 'Pragma']
+}));
+
+// PREFLIGHT DEBUGGING MIDDLEWARE
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    console.log('Handling OPTIONS preflight for:', req.path);
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS,PATCH');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With, Origin, Accept');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+app.use(express.json());
+app.use('/uploads', express.static(uploadsDir));
+
+// Socket.IO with CORS
 const io = new Server(server, {
   cors: {
     origin: corsOriginHandler,
@@ -119,22 +154,9 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET
 });
 
-// Middleware - Express CORS
-app.use(cors({
-  origin: corsOriginHandler,
-  credentials: true
-}));
-
-app.use(express.json());
-
-// SERVE STATIC FILES FROM UPLOADS DIRECTORY
-app.use('/uploads', express.static(uploadsDir));
-
 // MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/support-app';
 
-
-  // MongoDB Connection (continued from Part 1)
 mongoose.connect(MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch(err => console.error('MongoDB connection error:', err));
@@ -218,7 +240,7 @@ const ratingSchema = new mongoose.Schema({
   }
 });
 
-// UPDATED Message Schema with File Support
+// Chat Message Schema with File Support
 const chatMessageSchema = new mongoose.Schema({
   sender: {
     type: String,
@@ -254,7 +276,7 @@ const meetingLinksSchema = new mongoose.Schema({
   userZoom: String
 });
 
-// Fixed Message Schema
+// FIXED Message Schema
 const messageSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -298,18 +320,15 @@ const messageSchema = new mongoose.Schema({
   },
   userRating: ratingSchema,
   userCompletedAt: Date,
-  // FIXED: Make completedBy truly optional
   completedBy: {
     type: String,
     enum: ['user', 'admin'],
     required: false
-    // Don't set any default - let it be undefined
   }
 });
 
 const Message = mongoose.model('Message', messageSchema);
-
-// Admin authentication middleware
+// Authentication Middlewares
 const authenticate = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
@@ -333,7 +352,6 @@ const authenticate = async (req, res, next) => {
   }
 };
 
-// User authentication middleware
 const authenticateUser = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
@@ -355,7 +373,6 @@ const authenticateUser = async (req, res, next) => {
       return res.status(403).json({ error: 'Invalid token' });
     }
     
-    // Update last active
     user.lastActive = new Date();
     await user.save();
     
@@ -366,10 +383,15 @@ const authenticateUser = async (req, res, next) => {
   }
 };
 
-// FILE UPLOAD ROUTES
+// FIXED FILE UPLOAD ROUTES WITH CORS
 
-// Upload file to a specific message conversation
-app.post('/api/upload/:messageId', authenticateUser, upload.single('file'), async (req, res) => {
+// User File Upload
+app.post('/api/upload/:messageId', authenticateUser, (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  console.log('File upload request from origin:', req.headers.origin);
+  next();
+}, upload.single('file'), async (req, res) => {
   try {
     const { messageId } = req.params;
     const { caption } = req.body;
@@ -378,7 +400,6 @@ app.post('/api/upload/:messageId', authenticateUser, upload.single('file'), asyn
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Find the message and verify ownership
     const message = await Message.findById(messageId);
     if (!message) {
       return res.status(404).json({ error: 'Message not found' });
@@ -388,7 +409,6 @@ app.post('/api/upload/:messageId', authenticateUser, upload.single('file'), asyn
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Determine message type based on MIME type
     let messageType = 'text';
     if (req.file.mimetype.startsWith('image/')) {
       messageType = 'image';
@@ -396,7 +416,6 @@ app.post('/api/upload/:messageId', authenticateUser, upload.single('file'), asyn
       messageType = 'video';
     }
 
-    // Create file object
     const fileData = {
       filename: req.file.filename,
       originalName: req.file.originalname,
@@ -405,7 +424,6 @@ app.post('/api/upload/:messageId', authenticateUser, upload.single('file'), asyn
       url: `/uploads/${req.file.filename}`
     };
 
-    // Create chat message with file
     const chatMessage = {
       sender: 'user',
       message: caption || '',
@@ -414,24 +432,20 @@ app.post('/api/upload/:messageId', authenticateUser, upload.single('file'), asyn
       timestamp: new Date()
     };
 
-    // FIXED: Only update fields that should be updated, avoid completedBy
     const updateData = {
       $push: { chatMessages: chatMessage }
     };
     
-    // Update message status if it's still pending
     if (message.status === 'pending') {
       updateData.status = 'in-chat';
     }
 
-    // Use findByIdAndUpdate to avoid validation issues
-    const updatedMessage = await Message.findByIdAndUpdate(
+    await Message.findByIdAndUpdate(
       messageId,
       updateData,
       { new: true, runValidators: true }
     );
 
-    // Emit to admin dashboard and user in real-time
     const io = req.app.get('io');
     if (io) {
       io.emit('newChatMessage', {
@@ -452,7 +466,6 @@ app.post('/api/upload/:messageId', authenticateUser, upload.single('file'), asyn
   } catch (error) {
     console.error('File upload error:', error);
     
-    // Delete uploaded file if database operation fails
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
@@ -461,8 +474,13 @@ app.post('/api/upload/:messageId', authenticateUser, upload.single('file'), asyn
   }
 });
 
-// Admin file upload route
-app.post('/api/admin/upload/:messageId', authenticate, upload.single('file'), async (req, res) => {
+// Admin File Upload
+app.post('/api/admin/upload/:messageId', authenticate, (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  console.log('Admin file upload request from origin:', req.headers.origin);
+  next();
+}, upload.single('file'), async (req, res) => {
   try {
     const { messageId } = req.params;
     const { caption } = req.body;
@@ -471,13 +489,11 @@ app.post('/api/admin/upload/:messageId', authenticate, upload.single('file'), as
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Find the message
     const message = await Message.findById(messageId);
     if (!message) {
       return res.status(404).json({ error: 'Message not found' });
     }
 
-    // Determine message type based on MIME type
     let messageType = 'text';
     if (req.file.mimetype.startsWith('image/')) {
       messageType = 'image';
@@ -485,7 +501,6 @@ app.post('/api/admin/upload/:messageId', authenticate, upload.single('file'), as
       messageType = 'video';
     }
 
-    // Create file object
     const fileData = {
       filename: req.file.filename,
       originalName: req.file.originalname,
@@ -494,7 +509,6 @@ app.post('/api/admin/upload/:messageId', authenticate, upload.single('file'), as
       url: `/uploads/${req.file.filename}`
     };
 
-    // Create chat message with file
     const chatMessage = {
       sender: 'admin',
       message: caption || '',
@@ -503,12 +517,10 @@ app.post('/api/admin/upload/:messageId', authenticate, upload.single('file'), as
       timestamp: new Date()
     };
 
-    // FIXED: Only update necessary fields
     const updateData = {
       $push: { chatMessages: chatMessage }
     };
     
-    // Update message status to in-chat if needed
     if (message.status === 'pending') {
       updateData.status = 'in-chat';
     }
@@ -519,7 +531,6 @@ app.post('/api/admin/upload/:messageId', authenticate, upload.single('file'), as
       { new: true, runValidators: true }
     );
 
-    // Emit to user and admin dashboard in real-time
     const io = req.app.get('io');
     if (io) {
       io.emit('newChatMessage', {
@@ -540,7 +551,6 @@ app.post('/api/admin/upload/:messageId', authenticate, upload.single('file'), as
   } catch (error) {
     console.error('Admin file upload error:', error);
     
-    // Delete uploaded file if database operation fails
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
@@ -549,7 +559,7 @@ app.post('/api/admin/upload/:messageId', authenticate, upload.single('file'), as
   }
 });
 
-// Routes
+// Basic Routes
 app.get('/', (req, res) => {
   res.json({ 
     message: 'EhteCounseling API Server',
@@ -563,7 +573,6 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'Server is running!' });
 });
 
-// Debug endpoint (temporary)
 app.get('/api/debug', (req, res) => {
   res.json({
     origin: req.headers.origin,
@@ -586,7 +595,6 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters long' });
     }
 
-    // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ error: 'User with this email already exists' });
@@ -644,7 +652,6 @@ app.post('/api/auth/user-login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Update last active
     user.lastActive = new Date();
     await user.save();
 
@@ -692,7 +699,6 @@ app.post('/api/auth/validate-user', async (req, res) => {
       return res.status(403).json({ error: 'Invalid token' });
     }
 
-    // Update last active
     user.lastActive = new Date();
     await user.save();
 
@@ -716,7 +722,6 @@ app.post('/api/auth/create-admin', async (req, res) => {
       return res.status(400).json({ error: 'Email, password, and name are required' });
     }
 
-    // Check if admin already exists
     const existingAdmin = await Admin.findOne({ email });
     if (existingAdmin) {
       return res.status(400).json({ error: 'Admin with this email already exists' });
@@ -808,8 +813,7 @@ app.post('/api/auth/validate', async (req, res) => {
     res.status(403).json({ error: 'Invalid or expired token' });
   }
 });
-
-// Get all messages (protected route - admin only)
+// Message Routes
 app.get('/api/messages', authenticate, async (req, res) => {
   try {
     const messages = await Message.find().populate('userId', 'name email isAnonymous').sort({ timestamp: -1 });
@@ -820,7 +824,6 @@ app.get('/api/messages', authenticate, async (req, res) => {
   }
 });
 
-// Get user's messages (authenticated user only)
 app.get('/api/user/messages', authenticateUser, async (req, res) => {
   try {
     const messages = await Message.find({ userId: req.user._id }).sort({ timestamp: -1 });
@@ -831,7 +834,6 @@ app.get('/api/user/messages', authenticateUser, async (req, res) => {
   }
 });
 
-// Get single message
 app.get('/api/messages/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -847,7 +849,6 @@ app.get('/api/messages/:id', async (req, res) => {
   }
 });
 
-// Create new message (authenticated users only)
 app.post('/api/messages', authenticateUser, async (req, res) => {
   try {
     const { message } = req.body;
@@ -867,10 +868,8 @@ app.post('/api/messages', authenticateUser, async (req, res) => {
 
     await newMessage.save();
     
-    // Populate user info for admin dashboard
     await newMessage.populate('userId', 'name email isAnonymous');
     
-    // Emit to admin dashboard in real-time
     io.emit('newMessage', newMessage);
     
     console.log(`New message from ${req.user.name}: ${message.substring(0, 50)}...`);
@@ -886,30 +885,25 @@ app.post('/api/messages', authenticateUser, async (req, res) => {
   }
 });
 
-// Continue with remaining routes...
-// Socket.IO Connection Handling WITH FILE UPLOAD SUPPORT
+// Socket.IO Connection Handling
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
-  // Admin joins admin room
   socket.on('join-admin', () => {
     socket.join('admin');
     console.log(`Admin joined: ${socket.id}`);
   });
 
-  // User joins specific message room
   socket.on('join-message-room', (messageId) => {
     socket.join(`message-${messageId}`);
     console.log(`User joined message room: ${messageId}`);
   });
 
-  // User joins user-specific room
   socket.on('join-user-room', (userId) => {
     socket.join(`user-${userId}`);
     console.log(`User joined user room: ${userId}`);
   });
 
-  // Handle chat messages (supports both text and media)
   socket.on('send-chat-message', async (data) => {
     const { messageId, message, sender, messageType, file } = data;
     
@@ -922,18 +916,15 @@ io.on('connection', (socket) => {
         timestamp: new Date()
       };
 
-      // Add message to database
       await Message.findByIdAndUpdate(messageId, {
         $push: { chatMessages: chatMessage }
       });
 
-      // Broadcast to all clients in the message room
       io.to(`message-${messageId}`).emit('newChatMessage', {
         messageId: messageId,
         chatMessage: chatMessage
       });
 
-      // Also emit to admin room
       io.to('admin').emit('newChatMessage', {
         messageId: messageId,
         chatMessage: chatMessage
@@ -949,11 +940,9 @@ io.on('connection', (socket) => {
     }
   });
 
-    // Handle user completing session
   socket.on('user-completed-session', (data) => {
     const { messageId, userName } = data;
     
-    // Emit to admin dashboard
     io.to('admin').emit('userCompletedSession', {
       messageId: messageId,
       userName: userName
@@ -967,7 +956,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// Store io instance for use in routes
 app.set('io', io);
 
 // Update message status (admin only)
@@ -981,20 +969,21 @@ app.patch('/api/messages/:id/status', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Invalid status' });
     }
 
+    const updateData = { status: status };
+    if (status === 'completed') {
+      updateData.completedBy = 'admin';
+    }
+
     const message = await Message.findByIdAndUpdate(
       id, 
-      { 
-        status: status,
-        ...(status === 'completed' && { completedBy: 'admin' })
-      }, 
-      { new: true }
+      updateData,
+      { new: true, runValidators: true }
     );
     
     if (!message) {
       return res.status(404).json({ error: 'Message not found' });
     }
 
-    // Emit status update to the user
     io.emit('messageStatusUpdate', { id: id, status: status });
     
     res.json({ success: true, message });
@@ -1024,7 +1013,6 @@ app.patch('/api/messages/:id/meeting-links', authenticate, async (req, res) => {
 
     await message.save();
     
-    // Emit meeting links update to user
     io.emit('meetingLinksUpdate', {
       messageId: id,
       meetingLinks: message.meetingLinks
@@ -1050,22 +1038,18 @@ app.patch('/api/messages/:id/user-complete', authenticateUser, async (req, res) 
       return res.status(404).json({ error: 'Message not found' });
     }
 
-    // Verify that the authenticated user owns this message
     if (message.userId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Update the message status to completed and mark who completed it
     message.status = 'completed';
     message.completedBy = 'user';
     message.userCompletedAt = new Date();
     
     await message.save();
 
-    // Populate user info for the response
     await message.populate('userId', 'name email isAnonymous');
 
-    // Emit to admin dashboard that user completed the session
     io.emit('userCompletedSession', {
       messageId: id,
       userName: message.name || 'Anonymous',
@@ -1100,12 +1084,10 @@ app.post('/api/messages/:id/rating', authenticateUser, async (req, res) => {
       return res.status(404).json({ error: 'Message not found' });
     }
 
-    // Verify that the authenticated user owns this message
     if (message.userId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Add the rating
     message.userRating = {
       rating: rating,
       feedback: feedback || '',
@@ -1114,7 +1096,6 @@ app.post('/api/messages/:id/rating', authenticateUser, async (req, res) => {
 
     await message.save();
 
-    // Emit to admin dashboard
     io.emit('newRating', {
       messageId: id,
       rating: rating,
@@ -1144,17 +1125,14 @@ app.patch('/api/messages/:id/user-meeting-links', authenticateUser, async (req, 
       return res.status(404).json({ error: 'Message not found' });
     }
 
-    // Verify that the authenticated user owns this message
     if (message.userId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Update or create meeting links (merge with existing admin-set links)
     if (!message.meetingLinks) {
       message.meetingLinks = {};
     }
 
-    // User can set their own links, but preserve admin links if they exist
     if (googleMeet) {
       message.meetingLinks.userGoogleMeet = googleMeet;
     }
@@ -1188,7 +1166,6 @@ app.post('/api/create-payment-order', async (req, res) => {
 
     const amountInPaise = Math.round(amount * 100);
     
-    // Create shorter receipt to stay under 40 characters
     const shortId = messageId ? messageId.substring(messageId.length - 8) : 'guest';
     const timestamp = Date.now().toString().slice(-8);
     const receipt = `rcpt_${shortId}_${timestamp}`;
@@ -1217,7 +1194,7 @@ app.post('/api/create-payment-order', async (req, res) => {
   }
 });
 
-// Bulk delete messages (admin only) - MUST COME FIRST
+// Bulk delete messages (admin only)
 app.delete('/api/messages/bulk-delete', authenticate, async (req, res) => {
   try {
     const { messageIds } = req.body;
@@ -1226,7 +1203,6 @@ app.delete('/api/messages/bulk-delete', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Message IDs array is required' });
     }
 
-    // Delete associated files before deleting messages
     const messages = await Message.find({ _id: { $in: messageIds } });
     for (const message of messages) {
       if (message.chatMessages) {
@@ -1257,14 +1233,13 @@ app.delete('/api/messages/bulk-delete', authenticate, async (req, res) => {
   }
 });
 
-// Delete message/conversation (admin only) - MUST COME AFTER bulk-delete
+// Delete message/conversation (admin only)
 app.delete('/api/messages/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     
     console.log(`Attempting to delete message: ${id}`);
     
-    // Validate ObjectId format
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({ error: 'Invalid message ID format' });
     }
@@ -1275,7 +1250,6 @@ app.delete('/api/messages/:id', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Message not found' });
     }
 
-    // Delete associated files before deleting the message
     if (message.chatMessages) {
       for (const chatMsg of message.chatMessages) {
         if (chatMsg.file && chatMsg.file.filename) {
@@ -1311,7 +1285,6 @@ app.get('/api/payment/razorpay', async (req, res) => {
       return res.status(400).send('Order ID is required');
     }
 
-    // Create a simple HTML page that opens Razorpay
     const html = `
     <!DOCTYPE html>
     <html>
@@ -1399,7 +1372,6 @@ app.get('/api/payment/razorpay', async (req, res) => {
                     handler: function (response) {
                         setStatus('<div class="loading"></div> Verifying payment...');
                         
-                        // Send verification request
                         fetch('/api/verify-payment', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -1448,7 +1420,6 @@ app.get('/api/payment/razorpay', async (req, res) => {
                 }
             };
 
-            // Auto-trigger payment on page load for better UX
             setTimeout(() => {
                 document.getElementById('payButton').click();
             }, 1000);
@@ -1475,17 +1446,15 @@ app.post('/api/verify-payment', async (req, res) => {
                                     .digest('hex');
 
     if (expectedSignature === razorpay_signature) {
-      // Update message with payment info
       if (messageId) {
         await Message.findByIdAndUpdate(messageId, {
           paymentStatus: 'paid',
           paymentId: razorpay_payment_id,
-          amountPaid: amount / 100, // Convert from paise to rupees
+          amountPaid: amount / 100,
           paidAt: new Date()
         });
       }
 
-      // Emit payment received event to admin
       io.emit('paymentReceived', {
         messageId: messageId,
         amount: amount / 100,
@@ -1501,6 +1470,25 @@ app.post('/api/verify-payment', async (req, res) => {
   } catch (error) {
     console.error('Payment verification error:', error);
     res.status(500).json({ success: false, error: 'Payment verification failed' });
+  }
+});
+
+// CLEANUP ENDPOINT FOR FIXING NULL COMPLETED_BY VALUES
+app.post('/api/admin/fix-completed-by', authenticate, async (req, res) => {
+  try {
+    const result = await Message.updateMany(
+      { completedBy: null },
+      { $unset: { completedBy: 1 } }
+    );
+    
+    console.log(`Fixed ${result.modifiedCount} documents with null completedBy`);
+    res.json({
+      success: true,
+      message: `Fixed ${result.modifiedCount} documents`
+    });
+  } catch (error) {
+    console.error('Error fixing completedBy:', error);
+    res.status(500).json({ error: 'Failed to fix documents' });
   }
 });
 
