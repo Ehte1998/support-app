@@ -1277,6 +1277,7 @@ app.delete('/api/messages/:id', authenticate, async (req, res) => {
 });
 
 // Mobile Payment Redirect Endpoint
+// Replace your existing /api/payment/razorpay route with this:
 app.get('/api/payment/razorpay', async (req, res) => {
   try {
     const { orderId, amount, messageId } = req.query;
@@ -1285,6 +1286,12 @@ app.get('/api/payment/razorpay', async (req, res) => {
       return res.status(400).send('Order ID is required');
     }
 
+    // Set proper security headers
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+
     const html = `
     <!DOCTYPE html>
     <html>
@@ -1292,6 +1299,7 @@ app.get('/api/payment/razorpay', async (req, res) => {
         <title>Payment</title>
         <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta charset="utf-8">
         <style>
             body { 
                 font-family: Arial, sans-serif; 
@@ -1309,6 +1317,7 @@ app.get('/api/payment/razorpay', async (req, res) => {
                 border-radius: 10px;
                 max-width: 400px;
                 margin: 0 auto;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             }
             .btn {
                 background: #3b82f6;
@@ -1319,6 +1328,14 @@ app.get('/api/payment/razorpay', async (req, res) => {
                 border-radius: 5px;
                 cursor: pointer;
                 margin: 10px;
+                transition: background-color 0.2s;
+            }
+            .btn:hover {
+                background: #2563eb;
+            }
+            .btn:disabled {
+                background: #9ca3af;
+                cursor: not-allowed;
             }
             .amount {
                 font-size: 24px;
@@ -1339,6 +1356,12 @@ app.get('/api/payment/razorpay', async (req, res) => {
                 0% { transform: rotate(0deg); }
                 100% { transform: rotate(360deg); }
             }
+            .status {
+                margin-top: 20px;
+                font-size: 14px;
+                color: #666;
+                min-height: 20px;
+            }
         </style>
     </head>
     <body>
@@ -1349,7 +1372,7 @@ app.get('/api/payment/razorpay', async (req, res) => {
             <button id="payButton" class="btn">Pay Now</button>
             <br>
             <button onclick="window.close()" class="btn" style="background: #6b7280;">Cancel</button>
-            <div id="status" style="margin-top: 20px; font-size: 14px; color: #666;"></div>
+            <div id="status" class="status"></div>
         </div>
 
         <script>
@@ -1359,8 +1382,15 @@ app.get('/api/payment/razorpay', async (req, res) => {
                 statusEl.style.color = isError ? '#dc2626' : '#059669';
             }
 
+            function disableButtons(disabled = true) {
+                document.getElementById('payButton').disabled = disabled;
+            }
+
             document.getElementById('payButton').onclick = function() {
+                if (this.disabled) return;
+                
                 setStatus('<div class="loading"></div> Opening payment gateway...');
+                disableButtons(true);
                 
                 const options = {
                     key: '${process.env.RAZORPAY_KEY_ID}',
@@ -1388,15 +1418,21 @@ app.get('/api/payment/razorpay', async (req, res) => {
                             if (data.success) {
                                 setStatus('✅ Payment successful! You can close this window.');
                                 setTimeout(() => {
-                                    window.close();
+                                    try {
+                                        window.close();
+                                    } catch (e) {
+                                        setStatus('✅ Payment successful! Please close this window.');
+                                    }
                                 }, 3000);
                             } else {
                                 setStatus('❌ Payment verification failed. Please contact support.', true);
+                                disableButtons(false);
                             }
                         })
                         .catch(error => {
                             console.error('Verification error:', error);
                             setStatus('❌ Payment verification failed. Please contact support.', true);
+                            disableButtons(false);
                         });
                     },
                     prefill: {
@@ -1408,21 +1444,43 @@ app.get('/api/payment/razorpay', async (req, res) => {
                     modal: {
                         ondismiss: function() {
                             setStatus('Payment cancelled');
+                            disableButtons(false);
                         }
                     }
                 };
                 
                 if (window.Razorpay) {
-                    const rzp = new window.Razorpay(options);
-                    rzp.open();
+                    try {
+                        const rzp = new window.Razorpay(options);
+                        rzp.open();
+                    } catch (error) {
+                        console.error('Razorpay error:', error);
+                        setStatus('❌ Payment gateway error. Please try again.', true);
+                        disableButtons(false);
+                    }
                 } else {
                     setStatus('❌ Payment gateway not available. Please try again.', true);
+                    disableButtons(false);
                 }
             };
 
+            // Auto-trigger payment on page load for better UX
             setTimeout(() => {
-                document.getElementById('payButton').click();
+                if (!document.getElementById('payButton').disabled) {
+                    document.getElementById('payButton').click();
+                }
             }, 1000);
+
+            // Handle page visibility change
+            document.addEventListener('visibilitychange', function() {
+                if (document.visibilityState === 'visible') {
+                    // Page became visible again, re-enable buttons if needed
+                    const status = document.getElementById('status').textContent;
+                    if (status.includes('cancelled') || status.includes('failed')) {
+                        disableButtons(false);
+                    }
+                }
+            });
         </script>
     </body>
     </html>
