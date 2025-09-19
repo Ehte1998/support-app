@@ -8,6 +8,10 @@ const Razorpay = require('razorpay');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+// ADD THESE NEW DEPENDENCIES FOR FILE UPLOAD
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
@@ -24,6 +28,47 @@ if (process.env.NODE_ENV === 'production') {
     process.exit(1);
   }
 }
+
+// CREATE UPLOADS DIRECTORY IF IT DOESN'T EXIST
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// CONFIGURE MULTER FOR FILE UPLOADS
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadsDir);
+  },
+  filename: function (req, file, cb) {
+    // Create unique filename with timestamp and random string
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, file.fieldname + '-' + uniqueSuffix + ext);
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  // Allow images and videos
+  const allowedTypes = [
+    'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+    'video/mp4', 'video/mov', 'video/avi', 'video/mkv', 'video/webm', 'video/3gp'
+  ];
+  
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Only images and videos are allowed.'), false);
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: 4 * 1024 * 1024 * 1024, // 4GB limit
+  }
+});
 
 // Flexible CORS configuration function
 const corsOriginHandler = (origin, callback) => {
@@ -82,9 +127,14 @@ app.use(cors({
 
 app.use(express.json());
 
+// SERVE STATIC FILES FROM UPLOADS DIRECTORY
+app.use('/uploads', express.static(uploadsDir));
+
 // MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/support-app';
 
+
+  // MongoDB Connection (continued from Part 1)
 mongoose.connect(MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch(err => console.error('MongoDB connection error:', err));
@@ -168,7 +218,7 @@ const ratingSchema = new mongoose.Schema({
   }
 });
 
-// Message Schema
+// UPDATED Message Schema with File Support
 const chatMessageSchema = new mongoose.Schema({
   sender: {
     type: String,
@@ -177,7 +227,19 @@ const chatMessageSchema = new mongoose.Schema({
   },
   message: {
     type: String,
-    required: true
+    default: ''
+  },
+  messageType: {
+    type: String,
+    enum: ['text', 'image', 'video'],
+    default: 'text'
+  },
+  file: {
+    filename: String,
+    originalName: String,
+    mimetype: String,
+    size: Number,
+    url: String
   },
   timestamp: {
     type: Date,
@@ -300,6 +362,176 @@ const authenticateUser = async (req, res, next) => {
     return res.status(403).json({ error: 'Invalid or expired token' });
   }
 };
+
+// FILE UPLOAD ROUTES
+
+// Upload file to a specific message conversation
+app.post('/api/upload/:messageId', authenticateUser, upload.single('file'), async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { caption } = req.body;
+    
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    // Find the message and verify ownership
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    if (message.userId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Determine message type based on MIME type
+    let messageType = 'text';
+    if (req.file.mimetype.startsWith('image/')) {
+      messageType = 'image';
+    } else if (req.file.mimetype.startsWith('video/')) {
+      messageType = 'video';
+    }
+
+    // Create file object
+    const fileData = {
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      url: `/uploads/${req.file.filename}`
+    };
+
+    // Create chat message with file
+    const chatMessage = {
+      sender: 'user',
+      message: caption || '',
+      messageType: messageType,
+      file: fileData,
+      timestamp: new Date()
+    };
+
+    // Add to chat messages
+    message.chatMessages.push(chatMessage);
+    
+    // Update message status if it's still pending
+    if (message.status === 'pending') {
+      message.status = 'in-chat';
+    }
+
+    await message.save();
+
+    // Emit to admin dashboard and user in real-time
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('newChatMessage', {
+        messageId: messageId,
+        chatMessage: chatMessage
+      });
+    }
+
+    console.log(`File uploaded by user ${req.user.name}: ${req.file.originalname}`);
+
+    res.json({
+      success: true,
+      message: 'File uploaded successfully',
+      file: fileData,
+      chatMessage: chatMessage
+    });
+
+  } catch (error) {
+    console.error('File upload error:', error);
+    
+    // Delete uploaded file if database operation fails
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    res.status(500).json({ error: 'File upload failed' });
+  }
+});
+
+// Admin file upload route
+app.post('/api/admin/upload/:messageId', authenticate, upload.single('file'), async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { caption } = req.body;
+    
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    // Find the message
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    // Determine message type based on MIME type
+    let messageType = 'text';
+    if (req.file.mimetype.startsWith('image/')) {
+      messageType = 'image';
+    } else if (req.file.mimetype.startsWith('video/')) {
+      messageType = 'video';
+    }
+
+    // Create file object
+    const fileData = {
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      url: `/uploads/${req.file.filename}`
+    };
+
+    // Create chat message with file
+    const chatMessage = {
+      sender: 'admin',
+      message: caption || '',
+      messageType: messageType,
+      file: fileData,
+      timestamp: new Date()
+    };
+
+    // Add to chat messages
+    message.chatMessages.push(chatMessage);
+    
+    // Update message status to in-chat if needed
+    if (message.status === 'pending') {
+      message.status = 'in-chat';
+    }
+
+    await message.save();
+
+    // Emit to user and admin dashboard in real-time
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('newChatMessage', {
+        messageId: messageId,
+        chatMessage: chatMessage
+      });
+    }
+
+    console.log(`File uploaded by admin ${req.user.name}: ${req.file.originalname}`);
+
+    res.json({
+      success: true,
+      message: 'File uploaded successfully',
+      file: fileData,
+      chatMessage: chatMessage
+    });
+
+  } catch (error) {
+    console.error('Admin file upload error:', error);
+    
+    // Delete uploaded file if database operation fails
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    res.status(500).json({ error: 'File upload failed' });
+  }
+});
 
 // Routes
 app.get('/', (req, res) => {
@@ -612,6 +844,7 @@ app.post('/api/messages', authenticateUser, async (req, res) => {
       chatMessages: [{
         sender: 'user',
         message: message,
+        messageType: 'text',
         timestamp: new Date()
       }]
     });
@@ -636,6 +869,90 @@ app.post('/api/messages', authenticateUser, async (req, res) => {
     res.status(500).json({ error: 'Failed to send message' });
   }
 });
+
+// Continue with remaining routes...
+// Socket.IO Connection Handling WITH FILE UPLOAD SUPPORT
+io.on('connection', (socket) => {
+  console.log('Client connected:', socket.id);
+
+  // Admin joins admin room
+  socket.on('join-admin', () => {
+    socket.join('admin');
+    console.log(`Admin joined: ${socket.id}`);
+  });
+
+  // User joins specific message room
+  socket.on('join-message-room', (messageId) => {
+    socket.join(`message-${messageId}`);
+    console.log(`User joined message room: ${messageId}`);
+  });
+
+  // User joins user-specific room
+  socket.on('join-user-room', (userId) => {
+    socket.join(`user-${userId}`);
+    console.log(`User joined user room: ${userId}`);
+  });
+
+  // Handle chat messages (supports both text and media)
+  socket.on('send-chat-message', async (data) => {
+    const { messageId, message, sender, messageType, file } = data;
+    
+    try {
+      const chatMessage = {
+        sender: sender,
+        message: message || '',
+        messageType: messageType || 'text',
+        file: file || null,
+        timestamp: new Date()
+      };
+
+      // Add message to database
+      await Message.findByIdAndUpdate(messageId, {
+        $push: { chatMessages: chatMessage }
+      });
+
+      // Broadcast to all clients in the message room
+      io.to(`message-${messageId}`).emit('newChatMessage', {
+        messageId: messageId,
+        chatMessage: chatMessage
+      });
+
+      // Also emit to admin room
+      io.to('admin').emit('newChatMessage', {
+        messageId: messageId,
+        chatMessage: chatMessage
+      });
+
+      const messagePreview = messageType === 'text' ? 
+        message.substring(0, 50) + '...' : 
+        `${messageType} file: ${file?.originalName || 'unknown'}`;
+
+      console.log(`Chat message sent in ${messageId}: ${messagePreview}`);
+    } catch (error) {
+      console.error('Error handling chat message:', error);
+    }
+  });
+
+    // Handle user completing session
+  socket.on('user-completed-session', (data) => {
+    const { messageId, userName } = data;
+    
+    // Emit to admin dashboard
+    io.to('admin').emit('userCompletedSession', {
+      messageId: messageId,
+      userName: userName
+    });
+
+    console.log(`User ${userName} completed session ${messageId}`);
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+  });
+});
+
+// Store io instance for use in routes
+app.set('io', io);
 
 // Update message status (admin only)
 app.patch('/api/messages/:id/status', authenticate, async (req, res) => {
@@ -893,6 +1210,22 @@ app.delete('/api/messages/bulk-delete', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Message IDs array is required' });
     }
 
+    // Delete associated files before deleting messages
+    const messages = await Message.find({ _id: { $in: messageIds } });
+    for (const message of messages) {
+      if (message.chatMessages) {
+        for (const chatMsg of message.chatMessages) {
+          if (chatMsg.file && chatMsg.file.filename) {
+            const filePath = path.join(uploadsDir, chatMsg.file.filename);
+            if (fs.existsSync(filePath)) {
+              fs.unlinkSync(filePath);
+              console.log(`Deleted file: ${filePath}`);
+            }
+          }
+        }
+      }
+    }
+
     const result = await Message.deleteMany({ _id: { $in: messageIds } });
     
     console.log(`Admin bulk deleted ${result.deletedCount} messages`);
@@ -920,11 +1253,26 @@ app.delete('/api/messages/:id', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Invalid message ID format' });
     }
     
-    const message = await Message.findByIdAndDelete(id);
+    const message = await Message.findById(id);
     
     if (!message) {
       return res.status(404).json({ error: 'Message not found' });
     }
+
+    // Delete associated files before deleting the message
+    if (message.chatMessages) {
+      for (const chatMsg of message.chatMessages) {
+        if (chatMsg.file && chatMsg.file.filename) {
+          const filePath = path.join(uploadsDir, chatMsg.file.filename);
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            console.log(`Deleted file: ${filePath}`);
+          }
+        }
+      }
+    }
+
+    await Message.findByIdAndDelete(id);
 
     console.log(`Admin deleted message ${id}`);
     
@@ -1140,78 +1488,26 @@ app.post('/api/verify-payment', async (req, res) => {
   }
 });
 
-// Socket.IO Connection Handling
-io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
-
-  // Admin joins admin room
-  socket.on('join-admin', () => {
-    socket.join('admin');
-    console.log(`Admin joined: ${socket.id}`);
-  });
-
-  // User joins specific message room
-  socket.on('join-message-room', (messageId) => {
-    socket.join(`message-${messageId}`);
-    console.log(`User joined message room: ${messageId}`);
-  });
-
-  // User joins user-specific room
-  socket.on('join-user-room', (userId) => {
-    socket.join(`user-${userId}`);
-    console.log(`User joined user room: ${userId}`);
-  });
-
-  // Handle chat messages
-  socket.on('send-chat-message', async (data) => {
-    const { messageId, message, sender } = data;
-    
-    try {
-      const chatMessage = {
-        sender: sender,
-        message: message,
-        timestamp: new Date()
-      };
-
-      // Add message to database
-      await Message.findByIdAndUpdate(messageId, {
-        $push: { chatMessages: chatMessage }
-      });
-
-      // Broadcast to all clients in the message room
-      io.to(`message-${messageId}`).emit('newChatMessage', {
-        messageId: messageId,
-        chatMessage: chatMessage
-      });
-
-      // Also emit to admin room
-      io.to('admin').emit('newChatMessage', {
-        messageId: messageId,
-        chatMessage: chatMessage
-      });
-
-      console.log(`Chat message sent in ${messageId}: ${message.substring(0, 50)}...`);
-    } catch (error) {
-      console.error('Error handling chat message:', error);
+// Error handling middleware for multer
+app.use((error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'File too large. Maximum size is 4GB.' });
     }
-  });
+    return res.status(400).json({ error: `Upload error: ${error.message}` });
+  }
+  
+  if (error.message.includes('Invalid file type')) {
+    return res.status(400).json({ error: error.message });
+  }
+  
+  next(error);
+});
 
-  // Handle user completing session
-  socket.on('user-completed-session', (data) => {
-    const { messageId, userName } = data;
-    
-    // Emit to admin dashboard
-    io.to('admin').emit('userCompletedSession', {
-      messageId: messageId,
-      userName: userName
-    });
-
-    console.log(`User ${userName} completed session ${messageId}`);
-  });
-
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
-  });
+// Generic error handler
+app.use((error, req, res, next) => {
+  console.error('Unhandled error:', error);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 // Start Server
@@ -1219,6 +1515,7 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`Uploads directory: ${uploadsDir}`);
   if (process.env.NODE_ENV !== 'production') {
     console.log(`Admin Dashboard: http://localhost:${PORT}/?admin`);
     console.log(`User Interface: http://localhost:${PORT}/`);
