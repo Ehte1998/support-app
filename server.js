@@ -219,31 +219,55 @@ const ratingSchema = new mongoose.Schema({
 });
 
 // UPDATED Message Schema with File Support
-const chatMessageSchema = new mongoose.Schema({
-  sender: {
-    type: String,
-    enum: ['user', 'admin'],
+// Fixed Message Schema
+const messageSchema = new mongoose.Schema({
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true
   },
   message: {
     type: String,
-    default: ''
+    required: true
   },
-  messageType: {
+  name: {
     type: String,
-    enum: ['text', 'image', 'video'],
-    default: 'text'
+    default: 'Anonymous'
   },
-  file: {
-    filename: String,
-    originalName: String,
-    mimetype: String,
-    size: Number,
-    url: String
+  isAnonymous: {
+    type: Boolean,
+    default: true
   },
   timestamp: {
     type: Date,
     default: Date.now
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'in-chat', 'in-call', 'completed'],
+    default: 'pending'
+  },
+  paymentStatus: {
+    type: String,
+    enum: ['unpaid', 'paid'],
+    default: 'unpaid'
+  },
+  paymentId: String,
+  amountPaid: Number,
+  paidAt: Date,
+  chatMessages: [chatMessageSchema],
+  meetingLinks: meetingLinksSchema,
+  callNotificationSent: {
+    type: Boolean,
+    default: false
+  },
+  userRating: ratingSchema,
+  userCompletedAt: Date,
+  // FIXED: Remove default: null and make it truly optional
+  completedBy: {
+    type: String,
+    enum: ['user', 'admin']
+    // No default value - will be undefined until explicitly set
   }
 });
 
