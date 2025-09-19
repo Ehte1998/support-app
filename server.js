@@ -298,11 +298,12 @@ const messageSchema = new mongoose.Schema({
   },
   userRating: ratingSchema,
   userCompletedAt: Date,
-  // FIXED: Remove default: null and make it truly optional
+  // FIXED: Make completedBy truly optional
   completedBy: {
     type: String,
-    enum: ['user', 'admin']
-    // No default value - will be undefined until explicitly set
+    enum: ['user', 'admin'],
+    required: false
+    // Don't set any default - let it be undefined
   }
 });
 
@@ -413,15 +414,22 @@ app.post('/api/upload/:messageId', authenticateUser, upload.single('file'), asyn
       timestamp: new Date()
     };
 
-    // Add to chat messages
-    message.chatMessages.push(chatMessage);
+    // FIXED: Only update fields that should be updated, avoid completedBy
+    const updateData = {
+      $push: { chatMessages: chatMessage }
+    };
     
     // Update message status if it's still pending
     if (message.status === 'pending') {
-      message.status = 'in-chat';
+      updateData.status = 'in-chat';
     }
 
-    await message.save();
+    // Use findByIdAndUpdate to avoid validation issues
+    const updatedMessage = await Message.findByIdAndUpdate(
+      messageId,
+      updateData,
+      { new: true, runValidators: true }
+    );
 
     // Emit to admin dashboard and user in real-time
     const io = req.app.get('io');
@@ -495,15 +503,21 @@ app.post('/api/admin/upload/:messageId', authenticate, upload.single('file'), as
       timestamp: new Date()
     };
 
-    // Add to chat messages
-    message.chatMessages.push(chatMessage);
+    // FIXED: Only update necessary fields
+    const updateData = {
+      $push: { chatMessages: chatMessage }
+    };
     
     // Update message status to in-chat if needed
     if (message.status === 'pending') {
-      message.status = 'in-chat';
+      updateData.status = 'in-chat';
     }
 
-    await message.save();
+    await Message.findByIdAndUpdate(
+      messageId,
+      updateData,
+      { new: true, runValidators: true }
+    );
 
     // Emit to user and admin dashboard in real-time
     const io = req.app.get('io');
