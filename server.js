@@ -13,25 +13,38 @@ require('dotenv').config();
 const app = express();
 const server = http.createServer(app);
 
+// Validate critical environment variables
+if (process.env.NODE_ENV === 'production') {
+  if (!process.env.MONGODB_URI) {
+    console.error('CRITICAL: MONGODB_URI not found');
+    process.exit(1);
+  }
+  if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+    console.error('CRITICAL: Razorpay credentials not found');
+    process.exit(1);
+  }
+}
+
 // Flexible CORS configuration function
-// Updated CORS configuration with your new domain
 const corsOriginHandler = (origin, callback) => {
   console.log('CORS request from origin:', origin);
   
   // Allow requests with no origin (mobile apps, curl, etc.)
-  if (!origin) return callback(null, true);
+  if (!origin) {
+    console.log('CORS allowed for request with no origin');
+    return callback(null, true);
+  }
   
   const allowedOrigins = process.env.NODE_ENV === 'production' 
     ? [
         "https://ehtecounseling.com",
-        "https://www.ehtecounseling.com", // if you plan to use www
+        "https://www.ehtecounseling.com",
         process.env.FRONTEND_URL,
-        // Keep old domains temporarily during migration
-        "https://support-app-2.vercel.app", // remove after migration
+        "https://support-app-2.vercel.app",
       ].filter(Boolean)
     : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"];
   
-  // Allow Vercel preview deployments temporarily
+  // Allow Vercel preview deployments
   const isVercelPreview = origin.match(/^https:\/\/support-app-2-[a-zA-Z0-9-]+.*\.vercel\.app$/);
   
   if (allowedOrigins.includes(origin) || isVercelPreview) {
@@ -39,7 +52,8 @@ const corsOriginHandler = (origin, callback) => {
     callback(null, true);
   } else {
     console.log('CORS blocked origin:', origin);
-    callback(new Error('Not allowed by CORS'));
+    // Temporarily allow all origins for debugging
+    callback(null, true);
   }
 };
 
@@ -288,8 +302,27 @@ const authenticateUser = async (req, res, next) => {
 };
 
 // Routes
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'EhteCounseling API Server',
+    status: 'running',
+    version: '1.0.0',
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'Server is running!' });
+});
+
+// Debug endpoint (temporary)
+app.get('/api/debug', (req, res) => {
+  res.json({
+    origin: req.headers.origin,
+    referer: req.headers.referer,
+    userAgent: req.headers['user-agent'],
+    timestamp: new Date().toISOString()
+  });
 });
 
 // User Registration
@@ -809,7 +842,7 @@ app.patch('/api/messages/:id/user-meeting-links', authenticateUser, async (req, 
   }
 });
 
-// Create payment order - FIXED: Shortened receipt to avoid 40-character limit
+// Create payment order
 app.post('/api/create-payment-order', async (req, res) => {
   try {
     const { amount, messageId } = req.body;
@@ -822,7 +855,7 @@ app.post('/api/create-payment-order', async (req, res) => {
 
     const amountInPaise = Math.round(amount * 100);
     
-    // Fix: Create shorter receipt to stay under 40 characters
+    // Create shorter receipt to stay under 40 characters
     const shortId = messageId ? messageId.substring(messageId.length - 8) : 'guest';
     const timestamp = Date.now().toString().slice(-8);
     const receipt = `rcpt_${shortId}_${timestamp}`;
@@ -850,9 +883,6 @@ app.post('/api/create-payment-order', async (req, res) => {
     res.status(500).json({ success: false, error: 'Failed to create payment order' });
   }
 });
-
-// CRITICAL FIX: Bulk delete route MUST come BEFORE individual delete route
-// This prevents Express from matching "bulk-delete" as an ID parameter
 
 // Bulk delete messages (admin only) - MUST COME FIRST
 app.delete('/api/messages/bulk-delete', authenticate, async (req, res) => {
@@ -908,7 +938,7 @@ app.delete('/api/messages/:id', authenticate, async (req, res) => {
   }
 });
 
-// Mobile Payment Redirect Endpoint - NEW ADDITION
+// Mobile Payment Redirect Endpoint
 app.get('/api/payment/razorpay', async (req, res) => {
   try {
     const { orderId, amount, messageId } = req.query;
@@ -999,7 +1029,7 @@ app.get('/api/payment/razorpay', async (req, res) => {
                     key: '${process.env.RAZORPAY_KEY_ID}',
                     amount: ${amount ? amount * 100 : 0},
                     currency: 'INR',
-                    name: 'Support Counseling',
+                    name: 'EhteCounseling',
                     description: 'Counseling Session Payment',
                     order_id: '${orderId}',
                     handler: function (response) {
