@@ -219,6 +219,41 @@ const ratingSchema = new mongoose.Schema({
 });
 
 // UPDATED Message Schema with File Support
+const chatMessageSchema = new mongoose.Schema({
+  sender: {
+    type: String,
+    enum: ['user', 'admin'],
+    required: true
+  },
+  message: {
+    type: String,
+    default: ''
+  },
+  messageType: {
+    type: String,
+    enum: ['text', 'image', 'video'],
+    default: 'text'
+  },
+  file: {
+    filename: String,
+    originalName: String,
+    mimetype: String,
+    size: Number,
+    url: String
+  },
+  timestamp: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+const meetingLinksSchema = new mongoose.Schema({
+  googleMeet: String,
+  zoom: String,
+  userGoogleMeet: String,
+  userZoom: String
+});
+
 // Fixed Message Schema
 const messageSchema = new mongoose.Schema({
   userId: {
@@ -268,63 +303,6 @@ const messageSchema = new mongoose.Schema({
     type: String,
     enum: ['user', 'admin']
     // No default value - will be undefined until explicitly set
-  }
-});
-
-const meetingLinksSchema = new mongoose.Schema({
-  googleMeet: String,
-  zoom: String,
-  userGoogleMeet: String,
-  userZoom: String
-});
-
-const messageSchema = new mongoose.Schema({
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  message: {
-    type: String,
-    required: true
-  },
-  name: {
-    type: String,
-    default: 'Anonymous'
-  },
-  isAnonymous: {
-    type: Boolean,
-    default: true
-  },
-  timestamp: {
-    type: Date,
-    default: Date.now
-  },
-  status: {
-    type: String,
-    enum: ['pending', 'in-chat', 'in-call', 'completed'],
-    default: 'pending'
-  },
-  paymentStatus: {
-    type: String,
-    enum: ['unpaid', 'paid'],
-    default: 'unpaid'
-  },
-  paymentId: String,
-  amountPaid: Number,
-  paidAt: Date,
-  chatMessages: [chatMessageSchema],
-  meetingLinks: meetingLinksSchema,
-  callNotificationSent: {
-    type: Boolean,
-    default: false
-  },
-  userRating: ratingSchema,
-  userCompletedAt: Date,
-  completedBy: {
-    type: String,
-    enum: ['user', 'admin'],
-    default: null
   }
 });
 
