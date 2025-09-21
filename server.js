@@ -214,6 +214,18 @@ const adminSchema = new mongoose.Schema({
     type: String,
     default: 'admin'
   },
+  pushToken: {
+    type: String,
+    default: null
+  },
+  deviceType: {
+    type: String,
+    default: null
+  },
+  lastTokenUpdate: {
+    type: Date,
+    default: null
+  },
   createdAt: {
     type: Date,
     default: Date.now
@@ -811,6 +823,23 @@ app.post('/api/auth/validate', async (req, res) => {
     });
   } catch (error) {
     res.status(403).json({ error: 'Invalid or expired token' });
+  }
+});
+// Store push token (admin only)
+app.post('/api/admin/register-push-token', authenticate, async (req, res) => {
+  try {
+    const { pushToken, deviceType } = req.body;
+    
+    // You can store this in your admin schema or create a separate collection
+    await Admin.findByIdAndUpdate(req.user._id, {
+      pushToken: pushToken,
+      deviceType: deviceType,
+      lastTokenUpdate: new Date()
+    });
+    
+    res.json({ success: true, message: 'Push token registered' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to register push token' });
   }
 });
 // Message Routes
