@@ -1574,9 +1574,11 @@ app.use((error, req, res, next) => {
 
 // Start Server
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`Local: http://localhost:${PORT}`);
+  console.log(`Network: http://192.168.31.177:${PORT}`);
   console.log(`Uploads directory: ${uploadsDir}`);
   if (process.env.NODE_ENV !== 'production') {
     console.log(`Admin Dashboard: http://localhost:${PORT}/?admin`);
