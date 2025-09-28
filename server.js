@@ -11,7 +11,18 @@ const crypto = require('crypto');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const admin = require('firebase-admin'); // Added for push notifications
+// Conditional Firebase Admin import for push notifications
+let admin = null;
+let firebaseAvailable = false;
+
+try {
+  admin = require('firebase-admin');
+  firebaseAvailable = true;
+  console.log('Firebase Admin SDK loaded successfully');
+} catch (error) {
+  console.warn('Firebase Admin SDK not available:', error.message);
+  console.log('Server will start without push notifications');
+}
 require('dotenv').config();
 
 const app = express();
@@ -36,7 +47,7 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 // INITIALIZE FIREBASE ADMIN FOR PUSH NOTIFICATIONS
-if (!admin.apps.length) {
+if (firebaseAvailable && admin && !admin.apps.length) {
   try {
     if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
       const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
@@ -49,11 +60,13 @@ if (!admin.apps.length) {
       
       console.log('Firebase Admin initialized successfully');
     } else {
-      throw new Error('FIREBASE_SERVICE_ACCOUNT_KEY environment variable not found');
+      console.log('FIREBASE_SERVICE_ACCOUNT_KEY not found - push notifications disabled');
+      firebaseAvailable = false;
     }
   } catch (error) {
     console.error('Firebase Admin initialization failed:', error.message);
     console.log('Push notifications will be disabled');
+    firebaseAvailable = false;
   }
 }
 
@@ -868,7 +881,7 @@ app.post('/api/admin/register-push-token', authenticate, async (req, res) => {
 app.post('/api/admin/send-notification', authenticate, async (req, res) => {
   try {
     // Check if Firebase is initialized
-    if (!admin.apps.length) {
+    if (!firebaseAvailable || !admin) {
       return res.status(500).json({ error: 'Push notification service not available' });
     }
 
@@ -961,7 +974,7 @@ app.post('/api/messages', authenticateUser, async (req, res) => {
     
     // AUTO-NOTIFICATION FOR NEW MESSAGES
     try {
-      if (admin.apps.length > 0) {
+      if (firebaseAvailable && admin) {
         const admins = await Admin.find({ pushToken: { $exists: true, $ne: null } });
         if (admins.length > 0) {
           const tokens = admins.map(admin => admin.pushToken);
@@ -1048,7 +1061,7 @@ io.on('connection', (socket) => {
       
       // AUTO-NOTIFICATION FOR CHAT MESSAGES
       try {
-        if (admin.apps.length > 0) {
+        if (firebaseAvailable && admin) {
           const admins = await Admin.find({ pushToken: { $exists: true, $ne: null } });
           if (admins.length > 0) {
             const tokens = admins.map(admin => admin.pushToken);
