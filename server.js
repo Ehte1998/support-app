@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const admin = require('firebase-admin'); // Added for push notifications
 require('dotenv').config();
 
 const app = express();
@@ -32,6 +33,28 @@ if (process.env.NODE_ENV === 'production') {
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// INITIALIZE FIREBASE ADMIN FOR PUSH NOTIFICATIONS
+if (!admin.apps.length) {
+  try {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+      const credential = admin.credential.cert(serviceAccount);
+      
+      admin.initializeApp({
+        credential: credential,
+        projectId: 'supportadmin-15867'
+      });
+      
+      console.log('Firebase Admin initialized successfully');
+    } else {
+      throw new Error('FIREBASE_SERVICE_ACCOUNT_KEY environment variable not found');
+    }
+  } catch (error) {
+    console.error('Firebase Admin initialization failed:', error.message);
+    console.log('Push notifications will be disabled');
+  }
 }
 
 // CONFIGURE MULTER FOR FILE UPLOADS
@@ -160,8 +183,7 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/suppor
 mongoose.connect(MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch(err => console.error('MongoDB connection error:', err));
-
-// User Schema
+  // User Schema
 const userSchema = new mongoose.Schema({
   email: {
     type: String,
@@ -194,7 +216,7 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
-// Admin Schema
+// Admin Schema - Updated with push notification fields
 const adminSchema = new mongoose.Schema({
   email: {
     type: String,
@@ -570,7 +592,6 @@ app.post('/api/admin/upload/:messageId', authenticate, (req, res, next) => {
     res.status(500).json({ error: 'File upload failed' });
   }
 });
-
 // Basic Routes
 app.get('/', (req, res) => {
   res.json({ 
@@ -825,12 +846,12 @@ app.post('/api/auth/validate', async (req, res) => {
     res.status(403).json({ error: 'Invalid or expired token' });
   }
 });
+
 // Store push token (admin only)
 app.post('/api/admin/register-push-token', authenticate, async (req, res) => {
   try {
     const { pushToken, deviceType } = req.body;
     
-    // You can store this in your admin schema or create a separate collection
     await Admin.findByIdAndUpdate(req.user._id, {
       pushToken: pushToken,
       deviceType: deviceType,
@@ -840,6 +861,43 @@ app.post('/api/admin/register-push-token', authenticate, async (req, res) => {
     res.json({ success: true, message: 'Push token registered' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to register push token' });
+  }
+});
+
+// Send push notification endpoint
+app.post('/api/admin/send-notification', authenticate, async (req, res) => {
+  try {
+    // Check if Firebase is initialized
+    if (!admin.apps.length) {
+      return res.status(500).json({ error: 'Push notification service not available' });
+    }
+
+    const { title, body, data = {} } = req.body;
+    
+    // Get all admin tokens
+    const admins = await Admin.find({ pushToken: { $exists: true, $ne: null } });
+    
+    if (admins.length === 0) {
+      return res.json({ success: true, message: 'No devices to notify' });
+    }
+    const tokens = admins.map(admin => admin.pushToken);
+    
+    const message = {
+      notification: { title, body },
+      data: { ...data, timestamp: Date.now().toString() },
+      tokens: tokens
+    };
+    const response = await admin.messaging().sendMulticast(message);
+    
+    console.log(`Notification sent to ${response.successCount} devices`);
+    res.json({ 
+      success: true, 
+      successCount: response.successCount,
+      failureCount: response.failureCount 
+    });
+  } catch (error) {
+    console.error('Push notification error:', error);
+    res.status(500).json({ error: 'Failed to send notification' });
   }
 });
 // Message Routes
@@ -901,6 +959,29 @@ app.post('/api/messages', authenticateUser, async (req, res) => {
     
     io.emit('newMessage', newMessage);
     
+    // AUTO-NOTIFICATION FOR NEW MESSAGES
+    try {
+      if (admin.apps.length > 0) {
+        const admins = await Admin.find({ pushToken: { $exists: true, $ne: null } });
+        if (admins.length > 0) {
+          const tokens = admins.map(admin => admin.pushToken);
+          await admin.messaging().sendMulticast({
+            notification: {
+              title: 'New Support Message',
+              body: `Message from ${newMessage.name}`
+            },
+            data: {
+              type: 'new_message',
+              messageId: newMessage._id.toString()
+            },
+            tokens: tokens
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Auto notification error:', error);
+    }
+    
     console.log(`New message from ${req.user.name}: ${message.substring(0, 50)}...`);
     
     res.json({ 
@@ -914,7 +995,7 @@ app.post('/api/messages', authenticateUser, async (req, res) => {
   }
 });
 
-// Socket.IO Connection Handling
+// Socket.IO Connection Handling with Push Notifications
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
@@ -964,6 +1045,30 @@ io.on('connection', (socket) => {
         `${messageType} file: ${file?.originalName || 'unknown'}`;
 
       console.log(`Chat message sent in ${messageId}: ${messagePreview}`);
+      
+      // AUTO-NOTIFICATION FOR CHAT MESSAGES
+      try {
+        if (admin.apps.length > 0) {
+          const admins = await Admin.find({ pushToken: { $exists: true, $ne: null } });
+          if (admins.length > 0) {
+            const tokens = admins.map(admin => admin.pushToken);
+            await admin.messaging().sendMulticast({
+              notification: {
+                title: 'New Chat Message',
+                body: sender === 'user' ? `New message: ${messagePreview}` : 'Admin replied'
+              },
+              data: {
+                type: 'new_chat_message',
+                messageId: messageId
+              },
+              tokens: tokens
+            });
+          }
+        }
+      } catch (notificationError) {
+        console.error('Auto notification error:', notificationError);
+      }
+      
     } catch (error) {
       console.error('Error handling chat message:', error);
     }
@@ -986,7 +1091,6 @@ io.on('connection', (socket) => {
 });
 
 app.set('io', io);
-
 // Update message status (admin only)
 app.patch('/api/messages/:id/status', authenticate, async (req, res) => {
   try {
@@ -1306,7 +1410,6 @@ app.delete('/api/messages/:id', authenticate, async (req, res) => {
 });
 
 // Mobile Payment Redirect Endpoint
-// Replace your existing /api/payment/razorpay route with this:
 app.get('/api/payment/razorpay', async (req, res) => {
   try {
     const { orderId, amount, messageId } = req.query;
@@ -1315,7 +1418,6 @@ app.get('/api/payment/razorpay', async (req, res) => {
       return res.status(400).send('Order ID is required');
     }
 
-    // Set proper security headers
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-XSS-Protection', '1; mode=block');
@@ -1493,17 +1595,14 @@ app.get('/api/payment/razorpay', async (req, res) => {
                 }
             };
 
-            // Auto-trigger payment on page load for better UX
             setTimeout(() => {
                 if (!document.getElementById('payButton').disabled) {
                     document.getElementById('payButton').click();
                 }
             }, 1000);
 
-            // Handle page visibility change
             document.addEventListener('visibilitychange', function() {
                 if (document.visibilityState === 'visible') {
-                    // Page became visible again, re-enable buttons if needed
                     const status = document.getElementById('status').textContent;
                     if (status.includes('cancelled') || status.includes('failed')) {
                         disableButtons(false);
