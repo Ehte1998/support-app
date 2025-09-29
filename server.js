@@ -12,11 +12,6 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-app.use(express.static('public'));
-// Serve the delete account page
-app.get('/delete-account', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'delete-account.html'));
-});
 // Conditional Firebase Admin import for push notifications
 let admin = null;
 let firebaseAvailable = false;
@@ -33,6 +28,12 @@ require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
+
+app.use(express.static('public'));
+// Serve the delete account page
+app.get('/delete-account', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'delete-account.html'));
+});
 
 // Validate critical environment variables
 if (process.env.NODE_ENV === 'production') {
