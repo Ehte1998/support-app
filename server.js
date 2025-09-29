@@ -11,6 +11,12 @@ const crypto = require('crypto');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+
+app.use(express.static('public'));
+// Serve the delete account page
+app.get('/delete-account', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'delete-account.html'));
+});
 // Conditional Firebase Admin import for push notifications
 let admin = null;
 let firebaseAvailable = false;
@@ -626,6 +632,97 @@ app.get('/api/debug', (req, res) => {
     userAgent: req.headers['user-agent'],
     timestamp: new Date().toISOString()
   });
+});
+
+// DELETE account endpoint - requires authentication
+app.delete('/api/user/delete-account', authenticateUser, async (req, res) => {
+  try {
+    const userId = req.user._id || req.user.id;
+
+    // 1. Delete all messages created by this user
+    await Message.deleteMany({ userId: userId });
+
+    // 2. Delete all chat messages in conversations with this user
+    await Message.updateMany(
+      { 'chatMessages.sender': userId },
+      { $pull: { chatMessages: { sender: userId } } }
+    );
+
+    // 3. Delete ratings/feedback
+    if (mongoose.models.Rating) {
+      await mongoose.model('Rating').deleteMany({ userId: userId });
+    }
+
+    // 4. Delete media files
+    try {
+      const uploadsPath = path.join(__dirname, 'uploads');
+      const files = await fs.readdir(uploadsPath);
+      const userFiles = files.filter(file => file.includes(userId.toString()));
+      
+      for (const file of userFiles) {
+        await fs.unlink(path.join(uploadsPath, file));
+      }
+    } catch (err) {
+      console.log('Media cleanup error:', err);
+    }
+
+    // 5. Delete the user account
+    await User.findByIdAndDelete(userId);
+
+    res.json({ 
+      success: true, 
+      message: 'Account deleted successfully' 
+    });
+
+  } catch (error) {
+    console.error('Delete account error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to delete account' 
+    });
+  }
+});
+
+// POST endpoint for deletion request (for users who can't log in)
+app.post('/api/user/request-deletion', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    // Find user
+    const user = await User.findOne({ email: email.toLowerCase() });
+    
+    if (!user) {
+      // Don't reveal if email exists or not
+      return res.json({ 
+        success: true, 
+        message: 'If this email exists, a deletion request has been recorded.' 
+      });
+    }
+
+    // You can either:
+    // Option 1: Delete immediately
+    await User.findByIdAndDelete(user._id);
+    await Message.deleteMany({ userId: user._id });
+
+    // Option 2: Create a pending request (create a DeletionRequest model first)
+    // await DeletionRequest.create({ email, requestDate: new Date() });
+
+    res.json({ 
+      success: true, 
+      message: 'Account deletion request received. Processing within 48 hours.' 
+    });
+
+  } catch (error) {
+    console.error('Deletion request error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to process request' 
+    });
+  }
 });
 
 // User Registration
