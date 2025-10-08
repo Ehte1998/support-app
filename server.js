@@ -612,10 +612,36 @@ app.post('/api/admin/upload/:messageId', authenticate, (req, res, next) => {
     res.status(500).json({ error: 'File upload failed' });
   }
 });
+
+// 3. ADD PLATFORM DISCLAIMER ENDPOINT (add after line 555)
+app.get('/api/platform-info', (req, res) => {
+  res.json({
+    platformName: 'FeelingsShare',
+    platformType: 'peer_support',
+    disclaimer: {
+      title: 'Peer Support Platform',
+      message: 'This is a peer support platform where you can share your feelings with caring listeners. This is NOT professional therapy or medical advice. Listeners are volunteers, not licensed professionals. For emergencies, please contact crisis services immediately.',
+      emergencyResources: [
+        { name: 'Emergency Services', number: '112', type: 'emergency' },
+        { name: 'KIRAN Mental Health', number: '1800-599-0019', type: 'mental_health' },
+        { name: 'AASRA Suicide Prevention', number: '91-22-27546669', type: 'crisis' },
+        { name: 'Vandrevala Foundation', number: '1860-2662-345', type: 'crisis' }
+      ]
+    },
+    features: [
+      'Anonymous peer support',
+      'Text chat conversations',
+      'Video call option (Google Meet/Zoom)',
+      'Photo and video sharing',
+      'Pay what feels right (optional)'
+    ]
+  });
+});
+
 // Basic Routes
 app.get('/', (req, res) => {
   res.json({ 
-    message: 'EhteCounseling API Server',
+    message: 'FeelingsShare API Server - Peer Support Platform',
     status: 'running',
     version: '1.0.0',
     environment: process.env.NODE_ENV || 'development'
@@ -1078,8 +1104,8 @@ app.post('/api/messages', authenticateUser, async (req, res) => {
           const tokens = admins.map(admin => admin.pushToken);
           await admin.messaging().sendMulticast({
             notification: {
-              title: 'New Support Message',
-              body: `Message from ${newMessage.name}`
+              title: 'New Feelings Shared',
+              body: `${newMessage.name} shared their feelings`
             },
             data: {
               type: 'new_message',
@@ -1093,7 +1119,7 @@ app.post('/api/messages', authenticateUser, async (req, res) => {
       console.error('Auto notification error:', error);
     }
     
-    console.log(`New message from ${req.user.name}: ${message.substring(0, 50)}...`);
+    console.log(`New feelings shared by ${req.user.name}: ${message.substring(0, 50)}...`);
     
     res.json({ 
       success: true, 
@@ -1165,8 +1191,8 @@ io.on('connection', (socket) => {
             const tokens = admins.map(admin => admin.pushToken);
             await admin.messaging().sendMulticast({
               notification: {
-                title: 'New Chat Message',
-                body: sender === 'user' ? `New message: ${messagePreview}` : 'Admin replied'
+                title: 'New Message',
+                body: sender === 'user' ? `New message: ${messagePreview}` : 'Supporter Responded'
               },
               data: {
                 type: 'new_chat_message',
@@ -1185,15 +1211,15 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('user-completed-session', (data) => {
+  socket.on('user-completed-conversation', (data) => {
     const { messageId, userName } = data;
     
-    io.to('admin').emit('userCompletedSession', {
+    io.to('admin').emit('userCompletedconversation', {
       messageId: messageId,
       userName: userName
     });
 
-    console.log(`User ${userName} completed session ${messageId}`);
+    console.log(`User ${userName} completed conversation ${messageId}`);
   });
 
   socket.on('disconnect', () => {
@@ -1272,7 +1298,7 @@ app.patch('/api/messages/:id/meeting-links', authenticate, async (req, res) => {
   }
 });
 
-// User completes session endpoint
+// User completes conversation endpoint
 app.patch('/api/messages/:id/user-complete', authenticateUser, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1294,22 +1320,22 @@ app.patch('/api/messages/:id/user-complete', authenticateUser, async (req, res) 
 
     await message.populate('userId', 'name email isAnonymous');
 
-    io.emit('userCompletedSession', {
+    io.emit('userCompletedconversation', {
       messageId: id,
       userName: message.name || 'Anonymous',
       message: message
     });
 
-    console.log(`User ${req.user.name} completed session for message ${id}`);
+    console.log(`User ${req.user.name} completed conversation for message ${id}`);
     
     res.json({ 
       success: true, 
-      message: 'Session completed successfully',
+      message: 'conversation completed successfully',
       messageStatus: message.status 
     });
   } catch (error) {
-    console.error('Error completing user session:', error);
-    res.status(500).json({ error: 'Failed to complete session' });
+    console.error('Error completing user conversation:', error);
+    res.status(500).json({ error: 'Failed to complete conversation' });
   }
 });
 
@@ -1346,7 +1372,7 @@ app.post('/api/messages/:id/rating', authenticateUser, async (req, res) => {
       feedback: feedback
     });
 
-    console.log(`User ${req.user.name} rated session ${id} with ${rating} stars`);
+    console.log(`User ${req.user.name} rated conversation ${id} with ${rating} stars`);
     
     res.json({ 
       success: true, 
@@ -1538,7 +1564,7 @@ app.get('/api/payment/razorpay', async (req, res) => {
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Payment</title>
+        <title>Support Contribution</title>
         <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <meta charset="utf-8">
@@ -1608,12 +1634,12 @@ app.get('/api/payment/razorpay', async (req, res) => {
     </head>
     <body>
         <div class="container">
-            <h2>Payment Gateway</h2>
+            <h2>💙 Support Our Platform</h2>
             <div class="amount">Amount: ₹${amount || 'N/A'}</div>
-            <p>Click the button below to complete your payment</p>
-            <button id="payButton" class="btn">Pay Now</button>
+            <p>Your contribution helps keep our peer support platform running</p>
+            <button id="payButton" class="btn">Contribute Now</button>
             <br>
-            <button onclick="window.close()" class="btn" style="background: #6b7280;">Cancel</button>
+            <button onclick="window.close()" class="btn" style="background: #6b7280;">Maybe Later</button>
             <div id="status" class="status"></div>
         </div>
 
@@ -1638,8 +1664,8 @@ app.get('/api/payment/razorpay', async (req, res) => {
                     key: '${process.env.RAZORPAY_KEY_ID}',
                     amount: ${amount ? amount * 100 : 0},
                     currency: 'INR',
-                    name: 'EhteCounseling',
-                    description: 'Counseling Session Payment',
+                    name: 'FeelingsShare',
+                    description: 'Platform Support Contribution (Voluntary)',
                     order_id: '${orderId}',
                     handler: function (response) {
                         setStatus('<div class="loading"></div> Verifying payment...');
