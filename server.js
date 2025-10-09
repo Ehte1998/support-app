@@ -307,50 +307,79 @@ function generateCashfreeSignature(postData) {
     .digest('base64');
 }
 
-// Create Cashfree Order
+// Create Cashfree Order (UPDATED FOR v2 API)
 async function createCashfreeOrder(amount, messageId, customerDetails = {}) {
   try {
     const orderId = `order_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
+    // Cashfree v2 API uses different structure
     const orderData = {
-      appId: CASHFREE_APP_ID,
-      orderId: orderId,
-      orderAmount: amount,
-      orderCurrency: 'INR',
-      orderNote: 'Peer Support Platform Contribution',
-      customerName: customerDetails.name || 'User',
-      customerPhone: customerDetails.phone || '9999999999',
-      customerEmail: customerDetails.email || 'user@feelingsshare.com',
-      returnUrl: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/?payment-success`,
-      notifyUrl: `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/cashfree/webhook`,
-      paymentModes: 'upi'
+      order_id: orderId,
+      order_amount: amount,
+      order_currency: 'INR',
+      customer_details: {
+        customer_id: `customer_${Date.now()}`,
+        customer_name: customerDetails.name || 'User',
+        customer_email: customerDetails.email || 'user@feelingsshare.com',
+        customer_phone: customerDetails.phone || '9999999999'
+      },
+      order_meta: {
+        return_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/?payment-success&order_id={order_id}`,
+        notify_url: `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/cashfree/webhook`
+      },
+      order_note: 'Peer Support Platform Contribution'
     };
 
-    orderData.signature = generateCashfreeSignature(orderData);
+    console.log('📦 Cashfree v2 Request:');
+    console.log('   API URL:', `${CASHFREE_API_BASE}/pg/orders`);
+    console.log('   Order Data:', JSON.stringify(orderData, null, 2));
+    console.log('   App ID:', CASHFREE_APP_ID ? 'Set' : 'Missing');
+    console.log('   Secret Key:', CASHFREE_SECRET_KEY ? 'Set (hidden)' : 'Missing');
 
     const response = await axios.post(
-      `${CASHFREE_API_BASE}/api/v1/order/create`,
+      `${CASHFREE_API_BASE}/pg/orders`,
       orderData,
       {
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'x-api-version': '2022-09-01',
+          'x-client-id': CASHFREE_APP_ID,
+          'x-client-secret': CASHFREE_SECRET_KEY
         }
       }
     );
 
-    if (response.data.status === 'OK') {
-      return {
+    console.log('📥 Cashfree v2 Raw Response:');
+    console.log('   Status:', response.status);
+    console.log('   Full Response:', JSON.stringify(response.data, null, 2));
+    console.log('   payment_session_id:', response.data.payment_session_id);
+    console.log('   All keys:', Object.keys(response.data));
+
+    if (response.data.payment_session_id) {
+      // Cashfree v2 uses payment_session_id to generate the payment link
+      const paymentLink = `${CASHFREE_API_BASE}/pg/view/order/${response.data.cf_order_id || orderId}`;
+      
+      const result = {
         success: true,
         orderId: orderId,
-        paymentLink: response.data.paymentLink,
-        orderToken: response.data.cftoken
+        paymentLink: paymentLink,
+        sessionId: response.data.payment_session_id,
+        cfOrderId: response.data.cf_order_id
       };
+      
+      console.log('✅ Returning to endpoint:', JSON.stringify(result, null, 2));
+      return result;
     } else {
-      throw new Error(response.data.message || 'Failed to create order');
+      console.error('❌ No payment_session_id in response');
+      throw new Error('Failed to create order - no payment session');
     }
   } catch (error) {
-    console.error('Cashfree order creation error:', error.response?.data || error.message);
-    throw new Error('Failed to create Cashfree order');
+    console.error('💥 Cashfree order creation error:');
+    console.error('   Error message:', error.message);
+    console.error('   Response data:', JSON.stringify(error.response?.data, null, 2));
+    console.error('   Response status:', error.response?.status);
+    console.error('   Response headers:', error.response?.headers);
+    throw new Error(error.response?.data?.message || 'Failed to create Cashfree order');
   }
 }
 
