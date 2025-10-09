@@ -204,9 +204,7 @@ const PAYPAL_API_BASE = process.env.NODE_ENV === 'production'
 // Cashfree Configuration (for UPI/GPay)
 const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
 const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
-const CASHFREE_API_BASE = process.env.NODE_ENV === 'production'
-  ? 'https://api.cashfree.com'
-  : 'https://sandbox.cashfree.com';
+const CASHFREE_API_BASE = process.env.CASHFREE_API_BASE || 'https://sandbox.cashfree.com';
 
 // PayPal Access Token Function
 async function getPayPalAccessToken() {
@@ -292,19 +290,6 @@ async function capturePayPalPayment(orderId) {
     console.error('PayPal capture error:', error.response?.data || error.message);
     throw new Error('Failed to capture PayPal payment');
   }
-}
-
-// Generate Cashfree Signature
-function generateCashfreeSignature(postData) {
-  const signatureData = Object.keys(postData)
-    .sort()
-    .map(key => `${key}${postData[key]}`)
-    .join('');
-  
-  return crypto
-    .createHmac('sha256', CASHFREE_SECRET_KEY)
-    .update(signatureData)
-    .digest('base64');
 }
 
 // Create Cashfree Order (UPDATED FOR v2 API)
