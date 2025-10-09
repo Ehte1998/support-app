@@ -342,7 +342,8 @@ async function createCashfreeOrder(amount, messageId, customerDetails = {}) {
 
     if (response.data.payment_session_id) {
       // Cashfree v2 uses payment_session_id to generate the payment link
-      const paymentLink = `https://payments${CASHFREE_API_BASE.includes('sandbox') ? '-test' : ''}.cashfree.com/order/#/${response.data.payment_session_id}`;
+      const paymentLink = response.data.payments?.url || 
+                      `${CASHFREE_API_BASE}/pg/orders/${response.data.order_id}/payments`;
       
       const result = {
         success: true,
@@ -368,26 +369,34 @@ async function createCashfreeOrder(amount, messageId, customerDetails = {}) {
   }
 }
 
-// Verify Cashfree Payment
+// Verify Cashfree Payment (v2 API)
 async function verifyCashfreePayment(orderId) {
   try {
-    const response = await axios.post(
-      `${CASHFREE_API_BASE}/api/v1/order/info/status`,
-      {
-        appId: CASHFREE_APP_ID,
-        secretKey: CASHFREE_SECRET_KEY,
-        orderId: orderId
-      },
+    console.log('🔍 Verifying Cashfree payment for order:', orderId);
+    
+    const response = await axios.get(
+      `${CASHFREE_API_BASE}/pg/orders/${orderId}`,
       {
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'x-api-version': '2022-09-01',
+          'x-client-id': CASHFREE_APP_ID,
+          'x-client-secret': CASHFREE_SECRET_KEY
         }
       }
     );
 
-    return response.data;
+    console.log('📥 Cashfree verification response:', JSON.stringify(response.data, null, 2));
+
+    return {
+      orderId: response.data.order_id,
+      orderAmount: response.data.order_amount,
+      orderStatus: response.data.order_status,
+      txStatus: response.data.order_status === 'PAID' ? 'SUCCESS' : 'FAILED',
+      referenceId: response.data.cf_order_id
+    };
   } catch (error) {
-    console.error('Cashfree verification error:', error.response?.data || error.message);
+    console.error('💥 Cashfree verification error:', error.response?.data || error.message);
     throw new Error('Failed to verify Cashfree payment');
   }
 }
@@ -1812,218 +1821,6 @@ app.delete('/api/messages/:id', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Error deleting message:', error);
     res.status(500).json({ error: 'Failed to delete conversation' });
-  }
-});
-
-// Mobile Payment Redirect Endpoint
-app.get('/api/payment/razorpay', async (req, res) => {
-  try {
-    const { orderId, amount, messageId } = req.query;
-    
-    if (!orderId) {
-      return res.status(400).send('Order ID is required');
-    }
-
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-
-    const html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Support Contribution</title>
-        <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <meta charset="utf-8">
-        <style>
-            body { 
-                font-family: Arial, sans-serif; 
-                text-align: center; 
-                padding: 50px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                min-height: 100vh;
-                margin: 0;
-            }
-            .container {
-                background: white;
-                color: black;
-                padding: 30px;
-                border-radius: 10px;
-                max-width: 400px;
-                margin: 0 auto;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            }
-            .btn {
-                background: #3b82f6;
-                color: white;
-                border: none;
-                padding: 15px 30px;
-                font-size: 16px;
-                border-radius: 5px;
-                cursor: pointer;
-                margin: 10px;
-                transition: background-color 0.2s;
-            }
-            .btn:hover {
-                background: #2563eb;
-            }
-            .btn:disabled {
-                background: #9ca3af;
-                cursor: not-allowed;
-            }
-            .amount {
-                font-size: 24px;
-                font-weight: bold;
-                color: #10b981;
-                margin: 20px 0;
-            }
-            .loading {
-                display: inline-block;
-                width: 20px;
-                height: 20px;
-                border: 3px solid #f3f3f3;
-                border-top: 3px solid #3b82f6;
-                border-radius: 50%;
-                animation: spin 1s linear infinite;
-            }
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
-            .status {
-                margin-top: 20px;
-                font-size: 14px;
-                color: #666;
-                min-height: 20px;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h2>💙 Support Our Platform</h2>
-            <div class="amount">Amount: ₹${amount || 'N/A'}</div>
-            <p>Your contribution helps keep our peer support platform running</p>
-            <button id="payButton" class="btn">Contribute Now</button>
-            <br>
-            <button onclick="window.close()" class="btn" style="background: #6b7280;">Maybe Later</button>
-            <div id="status" class="status"></div>
-        </div>
-
-        <script>
-            function setStatus(message, isError = false) {
-                const statusEl = document.getElementById('status');
-                statusEl.innerHTML = message;
-                statusEl.style.color = isError ? '#dc2626' : '#059669';
-            }
-
-            function disableButtons(disabled = true) {
-                document.getElementById('payButton').disabled = disabled;
-            }
-
-            document.getElementById('payButton').onclick = function() {
-                if (this.disabled) return;
-                
-                setStatus('<div class="loading"></div> Opening payment gateway...');
-                disableButtons(true);
-                
-                const options = {
-                    key: '${process.env.RAZORPAY_KEY_ID}',
-                    amount: ${amount ? amount * 100 : 0},
-                    currency: 'INR',
-                    name: 'FeelingsShare',
-                    description: 'Platform Support Contribution (Voluntary)',
-                    order_id: '${orderId}',
-                    handler: function (response) {
-                        setStatus('<div class="loading"></div> Verifying payment...');
-                        
-                        fetch('/api/verify-payment', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                razorpay_order_id: response.razorpay_order_id,
-                                razorpay_payment_id: response.razorpay_payment_id,
-                                razorpay_signature: response.razorpay_signature,
-                                messageId: '${messageId}',
-                                amount: ${amount ? amount * 100 : 0}
-                            })
-                        })
-                        .then(res => res.json())
-                        .then(data => {
-                            if (data.success) {
-                                setStatus('✅ Payment successful! You can close this window.');
-                                setTimeout(() => {
-                                    try {
-                                        window.close();
-                                    } catch (e) {
-                                        setStatus('✅ Payment successful! Please close this window.');
-                                    }
-                                }, 3000);
-                            } else {
-                                setStatus('❌ Payment verification failed. Please contact support.', true);
-                                disableButtons(false);
-                            }
-                        })
-                        .catch(error => {
-                            console.error('Verification error:', error);
-                            setStatus('❌ Payment verification failed. Please contact support.', true);
-                            disableButtons(false);
-                        });
-                    },
-                    prefill: {
-                        name: 'User'
-                    },
-                    theme: {
-                        color: '#3b82f6'
-                    },
-                    modal: {
-                        ondismiss: function() {
-                            setStatus('Payment cancelled');
-                            disableButtons(false);
-                        }
-                    }
-                };
-                
-                if (window.Razorpay) {
-                    try {
-                        const rzp = new window.Razorpay(options);
-                        rzp.open();
-                    } catch (error) {
-                        console.error('Razorpay error:', error);
-                        setStatus('❌ Payment gateway error. Please try again.', true);
-                        disableButtons(false);
-                    }
-                } else {
-                    setStatus('❌ Payment gateway not available. Please try again.', true);
-                    disableButtons(false);
-                }
-            };
-
-            setTimeout(() => {
-                if (!document.getElementById('payButton').disabled) {
-                    document.getElementById('payButton').click();
-                }
-            }, 1000);
-
-            document.addEventListener('visibilitychange', function() {
-                if (document.visibilityState === 'visible') {
-                    const status = document.getElementById('status').textContent;
-                    if (status.includes('cancelled') || status.includes('failed')) {
-                        disableButtons(false);
-                    }
-                }
-            });
-        </script>
-    </body>
-    </html>
-    `;
-
-    res.send(html);
-  } catch (error) {
-    console.error('Payment page error:', error);
-    res.status(500).send('Payment page error');
   }
 });
 
