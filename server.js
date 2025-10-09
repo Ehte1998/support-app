@@ -1605,18 +1605,62 @@ app.patch('/api/messages/:id/user-meeting-links', authenticateUser, async (req, 
 });
 
 // Create Payment Order - Multi-Gateway
+// Replace your /api/create-payment-order endpoint with this DEBUG version
+
 app.post('/api/create-payment-order', async (req, res) => {
   try {
+    // === DEBUG LOGGING START ===
+    console.log('=================================');
+    console.log('📥 PAYMENT ORDER REQUEST RECEIVED');
+    console.log('=================================');
+    console.log('Raw Body:', JSON.stringify(req.body, null, 2));
+    console.log('Request Headers:', req.headers['content-type']);
+    console.log('---------------------------------');
+    
     const { amount, messageId, paymentMethod, customerDetails } = req.body;
+    
+    console.log('Parsed Values:');
+    console.log('  amount:', amount, typeof amount);
+    console.log('  messageId:', messageId, typeof messageId);
+    console.log('  paymentMethod:', paymentMethod, typeof paymentMethod);
+    console.log('  customerDetails:', customerDetails);
+    console.log('=================================');
+    // === DEBUG LOGGING END ===
 
     if (!amount || amount < 1) {
+      console.log('❌ Validation failed: Invalid amount');
       return res.status(400).json({ success: false, error: 'Valid amount is required' });
     }
 
+    // Check if paymentMethod is provided
+    if (!paymentMethod) {
+      console.log('❌ Validation failed: paymentMethod is missing or undefined');
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Payment method is required. Received: ' + paymentMethod 
+      });
+    }
+
+    // Check if paymentMethod is valid
+    const validMethods = ['paypal', 'upi', 'gpay'];
+    if (!validMethods.includes(paymentMethod)) {
+      console.log('❌ Validation failed: Invalid payment method:', paymentMethod);
+      console.log('Valid methods are:', validMethods);
+      return res.status(400).json({ 
+        success: false, 
+        error: `Invalid payment method: "${paymentMethod}". Choose: paypal, upi, or gpay` 
+      });
+    }
+
+    console.log('✅ Validation passed. Creating payment order...');
+
     // PayPal Payment
     if (paymentMethod === 'paypal') {
+      console.log('💙 Processing PayPal payment...');
       const amountUSD = (amount / 83).toFixed(2);
       const order = await createPayPalOrder(parseFloat(amountUSD), 'USD', messageId);
+      
+      console.log('✅ PayPal order created:', order.id);
       
       return res.json({
         success: true,
@@ -1630,7 +1674,10 @@ app.post('/api/create-payment-order', async (req, res) => {
     
     // UPI/GPay Payment (via Cashfree)
     else if (paymentMethod === 'upi' || paymentMethod === 'gpay') {
+      console.log(`💳 Processing ${paymentMethod.toUpperCase()} payment...`);
       const order = await createCashfreeOrder(amount, messageId, customerDetails);
+      
+      console.log('✅ Cashfree order created:', order.orderId);
       
       return res.json({
         success: true,
@@ -1642,21 +1689,34 @@ app.post('/api/create-payment-order', async (req, res) => {
         currency: 'INR'
       });
     }
-    
-    else {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Invalid payment method. Choose: paypal, upi, or gpay' 
-      });
-    }
 
   } catch (error) {
-    console.error('Payment order creation error:', error);
+    console.error('💥 Payment order creation error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Failed to create payment order' 
     });
   }
+});
+
+// Add this TEST endpoint to your server.js (for debugging only)
+
+app.post('/api/test-payment-data', (req, res) => {
+  console.log('📦 TEST ENDPOINT - Received data:');
+  console.log(JSON.stringify(req.body, null, 2));
+  
+  res.json({
+    success: true,
+    message: 'Data received successfully',
+    receivedData: req.body,
+    dataTypes: {
+      amount: typeof req.body.amount,
+      messageId: typeof req.body.messageId,
+      paymentMethod: typeof req.body.paymentMethod,
+      customerDetails: typeof req.body.customerDetails
+    }
+  });
 });
 
 // Bulk delete messages (admin only)
