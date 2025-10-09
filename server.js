@@ -4,7 +4,6 @@ const mongoose = require('mongoose');
 const { Server } = require('socket.io');
 const http = require('http');
 const axios = require('axios');
-const Razorpay = require('razorpay');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
@@ -41,8 +40,12 @@ if (process.env.NODE_ENV === 'production') {
     console.error('CRITICAL: MONGODB_URI not found');
     process.exit(1);
   }
-  if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-    console.error('CRITICAL: Razorpay credentials not found');
+  if (!process.env.PAYPAL_CLIENT_ID || !process.env.PAYPAL_CLIENT_SECRET) {
+    console.error('CRITICAL: PayPal credentials not found');
+    process.exit(1);
+  }
+  if (!process.env.CASHFREE_APP_ID || !process.env.CASHFREE_SECRET_KEY) {
+    console.error('CRITICAL: Cashfree credentials not found');
     process.exit(1);
   }
 }
@@ -191,11 +194,189 @@ const io = new Server(server, {
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secure-jwt-secret-change-in-production';
 
-// Initialize Razorpay
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET
-});
+// PayPal Configuration
+const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
+const PAYPAL_CLIENT_SECRET = process.env.PAYPAL_CLIENT_SECRET;
+const PAYPAL_API_BASE = process.env.NODE_ENV === 'production' 
+  ? 'https://api-m.paypal.com' 
+  : 'https://api-m.sandbox.paypal.com';
+
+// Cashfree Configuration (for UPI/GPay)
+const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
+const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
+const CASHFREE_API_BASE = process.env.NODE_ENV === 'production'
+  ? 'https://api.cashfree.com'
+  : 'https://sandbox.cashfree.com';
+
+// PayPal Access Token Function
+async function getPayPalAccessToken() {
+  try {
+    const auth = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`).toString('base64');
+    const response = await axios.post(
+      `${PAYPAL_API_BASE}/v1/oauth2/token`,
+      'grant_type=client_credentials',
+      {
+        headers: {
+          'Authorization': `Basic ${auth}`,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      }
+    );
+    return response.data.access_token;
+  } catch (error) {
+    console.error('PayPal token error:', error.response?.data || error.message);
+    throw new Error('Failed to get PayPal access token');
+  }
+}
+
+// Create PayPal Order
+async function createPayPalOrder(amount, currency = 'USD', messageId) {
+  try {
+    const accessToken = await getPayPalAccessToken();
+    
+    const orderData = {
+      intent: 'CAPTURE',
+      purchase_units: [{
+        reference_id: messageId || `order_${Date.now()}`,
+        amount: {
+          currency_code: currency,
+          value: amount.toFixed(2)
+        },
+        description: 'Peer Support Platform Contribution'
+      }],
+      application_context: {
+        brand_name: 'FeelingsShare',
+        landing_page: 'NO_PREFERENCE',
+        user_action: 'PAY_NOW',
+        return_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/?payment-success`,
+        cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/?payment-cancel`
+      }
+    };
+
+    const response = await axios.post(
+      `${PAYPAL_API_BASE}/v2/checkout/orders`,
+      orderData,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return response.data;
+  } catch (error) {
+    console.error('PayPal order creation error:', error.response?.data || error.message);
+    throw new Error('Failed to create PayPal order');
+  }
+}
+
+// Capture PayPal Payment
+async function capturePayPalPayment(orderId) {
+  try {
+    const accessToken = await getPayPalAccessToken();
+    
+    const response = await axios.post(
+      `${PAYPAL_API_BASE}/v2/checkout/orders/${orderId}/capture`,
+      {},
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return response.data;
+  } catch (error) {
+    console.error('PayPal capture error:', error.response?.data || error.message);
+    throw new Error('Failed to capture PayPal payment');
+  }
+}
+
+// Generate Cashfree Signature
+function generateCashfreeSignature(postData) {
+  const signatureData = Object.keys(postData)
+    .sort()
+    .map(key => `${key}${postData[key]}`)
+    .join('');
+  
+  return crypto
+    .createHmac('sha256', CASHFREE_SECRET_KEY)
+    .update(signatureData)
+    .digest('base64');
+}
+
+// Create Cashfree Order
+async function createCashfreeOrder(amount, messageId, customerDetails = {}) {
+  try {
+    const orderId = `order_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    const orderData = {
+      appId: CASHFREE_APP_ID,
+      orderId: orderId,
+      orderAmount: amount,
+      orderCurrency: 'INR',
+      orderNote: 'Peer Support Platform Contribution',
+      customerName: customerDetails.name || 'User',
+      customerPhone: customerDetails.phone || '9999999999',
+      customerEmail: customerDetails.email || 'user@feelingsshare.com',
+      returnUrl: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/?payment-success`,
+      notifyUrl: `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/cashfree/webhook`,
+      paymentModes: 'upi'
+    };
+
+    orderData.signature = generateCashfreeSignature(orderData);
+
+    const response = await axios.post(
+      `${CASHFREE_API_BASE}/api/v1/order/create`,
+      orderData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (response.data.status === 'OK') {
+      return {
+        success: true,
+        orderId: orderId,
+        paymentLink: response.data.paymentLink,
+        orderToken: response.data.cftoken
+      };
+    } else {
+      throw new Error(response.data.message || 'Failed to create order');
+    }
+  } catch (error) {
+    console.error('Cashfree order creation error:', error.response?.data || error.message);
+    throw new Error('Failed to create Cashfree order');
+  }
+}
+
+// Verify Cashfree Payment
+async function verifyCashfreePayment(orderId) {
+  try {
+    const response = await axios.post(
+      `${CASHFREE_API_BASE}/api/v1/order/info/status`,
+      {
+        appId: CASHFREE_APP_ID,
+        secretKey: CASHFREE_SECRET_KEY,
+        orderId: orderId
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return response.data;
+  } catch (error) {
+    console.error('Cashfree verification error:', error.response?.data || error.message);
+    throw new Error('Failed to verify Cashfree payment');
+  }
+}
 
 // MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/support-app';
@@ -1423,44 +1604,58 @@ app.patch('/api/messages/:id/user-meeting-links', authenticateUser, async (req, 
   }
 });
 
-// Create payment order
+// Create Payment Order - Multi-Gateway
 app.post('/api/create-payment-order', async (req, res) => {
   try {
-    const { amount, messageId } = req.body;
-
-    console.log('Creating payment order:', { amount, messageId });
+    const { amount, messageId, paymentMethod, customerDetails } = req.body;
 
     if (!amount || amount < 1) {
       return res.status(400).json({ success: false, error: 'Valid amount is required' });
     }
 
-    const amountInPaise = Math.round(amount * 100);
+    // PayPal Payment
+    if (paymentMethod === 'paypal') {
+      const amountUSD = (amount / 83).toFixed(2);
+      const order = await createPayPalOrder(parseFloat(amountUSD), 'USD', messageId);
+      
+      return res.json({
+        success: true,
+        paymentMethod: 'paypal',
+        orderId: order.id,
+        approvalUrl: order.links.find(link => link.rel === 'approve')?.href,
+        amount: amountUSD,
+        currency: 'USD'
+      });
+    }
     
-    const shortId = messageId ? messageId.substring(messageId.length - 8) : 'guest';
-    const timestamp = Date.now().toString().slice(-8);
-    const receipt = `rcpt_${shortId}_${timestamp}`;
+    // UPI/GPay Payment (via Cashfree)
+    else if (paymentMethod === 'upi' || paymentMethod === 'gpay') {
+      const order = await createCashfreeOrder(amount, messageId, customerDetails);
+      
+      return res.json({
+        success: true,
+        paymentMethod: paymentMethod,
+        orderId: order.orderId,
+        paymentLink: order.paymentLink,
+        orderToken: order.orderToken,
+        amount: amount,
+        currency: 'INR'
+      });
+    }
     
-    console.log(`Creating payment order: Amount=${amount}, Receipt=${receipt} (${receipt.length} chars)`);
-    
-    const order = await razorpay.orders.create({
-      amount: amountInPaise,
-      currency: 'INR',
-      receipt: receipt,
-      payment_capture: 1
-    });
+    else {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid payment method. Choose: paypal, upi, or gpay' 
+      });
+    }
 
-    console.log(`Payment order created successfully: ${order.id}`);
-
-    res.json({
-      success: true,
-      orderId: order.id,
-      amount: order.amount,
-      currency: order.currency,
-      keyId: process.env.RAZORPAY_KEY_ID
-    });
   } catch (error) {
     console.error('Payment order creation error:', error);
-    res.status(500).json({ success: false, error: 'Failed to create payment order' });
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to create payment order' 
+    });
   }
 });
 
@@ -1758,41 +1953,130 @@ app.get('/api/payment/razorpay', async (req, res) => {
   }
 });
 
-// Verify payment
+// Verify Payment - Multi-Gateway
 app.post('/api/verify-payment', async (req, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, messageId, amount } = req.body;
+    const { paymentMethod, orderId, messageId, amount } = req.body;
 
-    const body = razorpay_order_id + "|" + razorpay_payment_id;
-    const expectedSignature = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-                                    .update(body.toString())
-                                    .digest('hex');
+    // PayPal Verification
+    if (paymentMethod === 'paypal') {
+      const captureData = await capturePayPalPayment(orderId);
+      
+      if (captureData.status === 'COMPLETED') {
+        if (messageId) {
+          const amountPaid = parseFloat(captureData.purchase_units[0].payments.captures[0].amount.value);
+          
+          await Message.findByIdAndUpdate(messageId, {
+            paymentStatus: 'paid',
+            paymentId: captureData.id,
+            paymentMethod: 'paypal',
+            amountPaid: amountPaid,
+            paidAt: new Date()
+          });
 
-    if (expectedSignature === razorpay_signature) {
-      if (messageId) {
-        await Message.findByIdAndUpdate(messageId, {
-          paymentStatus: 'paid',
-          paymentId: razorpay_payment_id,
-          amountPaid: amount / 100,
-          paidAt: new Date()
+          io.emit('paymentReceived', {
+            messageId: messageId,
+            amount: amountPaid,
+            paymentId: captureData.id,
+            method: 'paypal'
+          });
+        }
+
+        return res.json({ 
+          success: true, 
+          message: 'PayPal payment verified successfully',
+          captureId: captureData.id
+        });
+      } else {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Payment not completed' 
         });
       }
-
-      io.emit('paymentReceived', {
-        messageId: messageId,
-        amount: amount / 100,
-        paymentId: razorpay_payment_id
-      });
-
-      console.log(`Payment verified for message ${messageId}: ₹${amount / 100}`);
-
-      res.json({ success: true, message: 'Payment verified successfully' });
-    } else {
-      res.status(400).json({ success: false, error: 'Payment verification failed' });
     }
+    
+    // UPI/GPay Verification (via Cashfree)
+    else if (paymentMethod === 'upi' || paymentMethod === 'gpay') {
+      const paymentData = await verifyCashfreePayment(orderId);
+      
+      if (paymentData.txStatus === 'SUCCESS') {
+        if (messageId) {
+          await Message.findByIdAndUpdate(messageId, {
+            paymentStatus: 'paid',
+            paymentId: paymentData.referenceId,
+            paymentMethod: paymentMethod,
+            amountPaid: parseFloat(paymentData.orderAmount),
+            paidAt: new Date()
+          });
+
+          io.emit('paymentReceived', {
+            messageId: messageId,
+            amount: parseFloat(paymentData.orderAmount),
+            paymentId: paymentData.referenceId,
+            method: paymentMethod
+          });
+        }
+
+        return res.json({ 
+          success: true, 
+          message: 'Payment verified successfully',
+          transactionId: paymentData.referenceId
+        });
+      } else {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Payment verification failed' 
+        });
+      }
+    }
+    
+    else {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid payment method' 
+      });
+    }
+
   } catch (error) {
     console.error('Payment verification error:', error);
-    res.status(500).json({ success: false, error: 'Payment verification failed' });
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Payment verification failed' 
+    });
+  }
+});
+
+// Cashfree Callback Handler
+app.post('/api/cashfree/callback', async (req, res) => {
+  try {
+    const { orderId, orderAmount, txStatus, referenceId } = req.body;
+    
+    console.log('Cashfree callback:', { orderId, txStatus, referenceId });
+    
+    if (txStatus === 'SUCCESS') {
+      res.redirect(`${process.env.FRONTEND_URL}/?payment-success&orderId=${orderId}&orderAmount=${orderAmount}`);
+    } else {
+      res.redirect(`${process.env.FRONTEND_URL}/?payment-failed&orderId=${orderId}`);
+    }
+  } catch (error) {
+    console.error('Cashfree callback error:', error);
+    res.status(500).send('Callback processing failed');
+  }
+});
+
+// Cashfree Webhook Handler
+app.post('/api/cashfree/webhook', async (req, res) => {
+  try {
+    const webhookData = req.body;
+    console.log('Cashfree webhook:', webhookData);
+    
+    // Process webhook data
+    // Update order status in database
+    
+    res.status(200).send('OK');
+  } catch (error) {
+    console.error('Cashfree webhook error:', error);
+    res.status(500).send('Webhook processing failed');
   }
 });
 
