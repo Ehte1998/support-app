@@ -342,8 +342,12 @@ async function createCashfreeOrder(amount, messageId, customerDetails = {}) {
 
     if (response.data.payment_session_id) {
       // Cashfree v2 uses payment_session_id to generate the payment link
-      const paymentLink = response.data.payments?.url || 
-                      `${CASHFREE_API_BASE}/pg/orders/${response.data.order_id}/payments`;
+      const isSandbox = CASHFREE_API_BASE.includes('sandbox');
+      const checkoutBaseURL = isSandbox
+        ? 'https://sandbox.cashfree.com'
+        : 'https://api.cashfree.com';
+
+      const paymentLink = `${checkoutBaseURL}/pg/view/order/${response.data.cf_order_id}`;
       
       const result = {
         success: true,
