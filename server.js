@@ -1846,11 +1846,13 @@ app.delete('/api/messages/:id', authenticate, async (req, res) => {
 // Verify Payment - Multi-Gateway
 app.post('/api/verify-payment', async (req, res) => {
   try {
-    const { paymentMethod, orderId, messageId } = req.body;
+    const requestData = req.body;
+    let paymentMethod = requestData.paymentMethod;
+    const orderId = requestData.orderId;
+    let messageId = requestData.messageId;
 
     console.log('🔍 Verifying payment:', { paymentMethod, orderId, messageId });
 
-    // ⬇️⬇️⬇️ ADD FALLBACK LOGIC ⬇️⬇️⬇️
     // If payment method not provided, try to find it in database
     if (!paymentMethod && orderId) {
       console.log('⚠️ No payment method provided, checking database...');
@@ -1867,7 +1869,10 @@ app.post('/api/verify-payment', async (req, res) => {
     }
 
     // Default to upi if still not found
-    paymentMethod = paymentMethod || 'upi';
+    if (!paymentMethod) {
+      paymentMethod = 'upi';
+    }
+
     console.log('📍 Final payment method:', paymentMethod);
 
     // UPI/GPay Verification (via Cashfree)
@@ -1877,8 +1882,7 @@ app.post('/api/verify-payment', async (req, res) => {
       console.log('📥 Cashfree payment data:', paymentData);
 
       if (paymentData.orderStatus === 'PAID') {
-
-        // ⬇️⬇️⬇️ CLEAR PENDING PAYMENT DATA ⬇️⬇️⬇️
+        // Clear pending payment data
         if (messageId) {
           await Message.findByIdAndUpdate(messageId, {
             $unset: {
@@ -1889,6 +1893,7 @@ app.post('/api/verify-payment', async (req, res) => {
             }
           });
         }
+
         return res.json({
           success: true,
           message: 'Payment verified successfully',
@@ -1931,6 +1936,7 @@ app.post('/api/verify-payment', async (req, res) => {
 
   } catch (error) {
     console.error('💥 Payment verification error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
       error: error.message || 'Payment verification failed'
