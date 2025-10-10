@@ -557,6 +557,12 @@ const messageSchema = new mongoose.Schema({
     enum: ['pending', 'in-chat', 'in-call', 'completed'],
     default: 'pending'
   },
+
+  pendingPaymentOrderId: String,
+  pendingPaymentMethod: String,
+  pendingPaymentAmount: Number,
+  pendingPaymentCreatedAt: Date,
+
   paymentStatus: {
     type: String,
     enum: ['unpaid', 'paid'],
@@ -1697,6 +1703,24 @@ app.post('/api/create-payment-order', async (req, res) => {
 
       console.log('✅ Cashfree order created:', order.orderId);
 
+      // Store payment intent in database as backup
+      if (messageId) {
+        try {
+          await Message.findByIdAndUpdate(messageId, {
+            $set: {
+              pendingPaymentOrderId: order.orderId,
+              pendingPaymentMethod: paymentMethod,
+              pendingPaymentAmount: amount,
+              pendingPaymentCreatedAt: new Date()
+            }
+          });
+          console.log('💾 Stored payment intent in database for message:', messageId);
+        } catch (err) {
+          console.error('⚠️ Failed to store payment intent:', err);
+          // Don't fail the payment if database update fails
+        }
+      }
+
       return res.json({
         success: true,
         paymentMethod: paymentMethod,
@@ -1826,6 +1850,26 @@ app.post('/api/verify-payment', async (req, res) => {
 
     console.log('🔍 Verifying payment:', { paymentMethod, orderId, messageId });
 
+    // ⬇️⬇️⬇️ ADD FALLBACK LOGIC ⬇️⬇️⬇️
+    // If payment method not provided, try to find it in database
+    if (!paymentMethod && orderId) {
+      console.log('⚠️ No payment method provided, checking database...');
+
+      const message = await Message.findOne({
+        pendingPaymentOrderId: orderId
+      });
+
+      if (message && message.pendingPaymentMethod) {
+        paymentMethod = message.pendingPaymentMethod;
+        messageId = messageId || message._id.toString();
+        console.log('✅ Found payment method from database:', paymentMethod);
+      }
+    }
+
+    // Default to upi if still not found
+    paymentMethod = paymentMethod || 'upi';
+    console.log('📍 Final payment method:', paymentMethod);
+
     // UPI/GPay Verification (via Cashfree)
     if (paymentMethod === 'upi' || paymentMethod === 'gpay') {
       const paymentData = await verifyCashfreePayment(orderId);
@@ -1833,6 +1877,18 @@ app.post('/api/verify-payment', async (req, res) => {
       console.log('📥 Cashfree payment data:', paymentData);
 
       if (paymentData.orderStatus === 'PAID') {
+
+        // ⬇️⬇️⬇️ CLEAR PENDING PAYMENT DATA ⬇️⬇️⬇️
+        if (messageId) {
+          await Message.findByIdAndUpdate(messageId, {
+            $unset: {
+              pendingPaymentOrderId: 1,
+              pendingPaymentMethod: 1,
+              pendingPaymentAmount: 1,
+              pendingPaymentCreatedAt: 1
+            }
+          });
+        }
         return res.json({
           success: true,
           message: 'Payment verified successfully',
