@@ -1701,7 +1701,8 @@ app.post('/api/create-payment-order', async (req, res) => {
         success: true,
         paymentMethod: paymentMethod,
         orderId: order.orderId,
-        orderToken: order.orderToken,
+        paymentSessionId: order.paymentSessionId,  // ✅ Change this!
+        cfOrderId: order.cfOrderId,
         amount: amount,
         currency: 'INR'
       });
