@@ -1938,46 +1938,64 @@ app.post('/api/verify-payment', async (req, res) => {
   }
 });
 
-// Cashfree Webhook Handler (UPDATED)
+// Cashfree Webhook Handler (FIXED VERSION)
 app.post('/api/cashfree/webhook', async (req, res) => {
   try {
     const webhookData = req.body;
     console.log('📥 Cashfree webhook received:', JSON.stringify(webhookData, null, 2));
-
-    // Verify webhook signature (IMPORTANT for production!)
-    const signature = req.headers['x-webhook-signature'];
-    const timestamp = req.headers['x-webhook-timestamp'];
 
     // Handle payment status
     if (webhookData.type === 'PAYMENT_SUCCESS_WEBHOOK') {
       const orderId = webhookData.data.order.order_id;
       const amount = webhookData.data.payment.payment_amount;
       const paymentId = webhookData.data.payment.cf_payment_id;
-      const customerId = webhookData.data.customer_details.customer_id;
 
-      console.log('🔍 Looking for message with customer:', customerId);
+      console.log('✅ Payment success for order:', orderId);
 
-      // Extract timestamp from customer_id (customer_1760104415218)
-      const timestamp = customerId.replace('customer_', '');
-
-      // Find message created around that time (within 5 minutes)
-      const timeWindow = 5 * 60 * 1000; // 5 minutes in milliseconds
-      const messageTime = parseInt(timestamp);
-
-      const message = await Message.findOne({
-        timestamp: {
-          $gte: new Date(messageTime - timeWindow),
-          $lte: new Date(messageTime + timeWindow)
-        },
-        paymentStatus: { $ne: 'paid' }
-      }).sort({ timestamp: -1 });
+      // ⬇️⬇️⬇️ IMPROVED LOGIC: Find by pendingPaymentOrderId first ⬇️⬇️⬇️
+      let message = await Message.findOne({
+        pendingPaymentOrderId: orderId
+      });
 
       if (message) {
+        console.log('✅ Found message by pendingPaymentOrderId:', message._id);
+      } else {
+        // Fallback: Try to find by timestamp
+        console.log('⚠️ Message not found by orderId, trying timestamp method...');
+
+        const customerId = webhookData.data.customer_details.customer_id;
+        const timestamp = customerId.replace('customer_', '');
+        const timeWindow = 10 * 60 * 1000; // 10 minutes window
+        const messageTime = parseInt(timestamp);
+
+        message = await Message.findOne({
+          timestamp: {
+            $gte: new Date(messageTime - timeWindow),
+            $lte: new Date(messageTime + timeWindow)
+          },
+          paymentStatus: { $ne: 'paid' }
+        }).sort({ timestamp: -1 });
+
+        if (message) {
+          console.log('✅ Found message by timestamp:', message._id);
+        }
+      }
+      // ⬆️⬆️⬆️ IMPROVED LOGIC ⬆️⬆️⬆️
+
+      if (message) {
+        // Update payment status
         message.paymentStatus = 'paid';
         message.paymentId = paymentId;
         message.paymentMethod = 'cashfree';
         message.amountPaid = amount;
         message.paidAt = new Date();
+
+        // Clear pending payment data
+        message.pendingPaymentOrderId = undefined;
+        message.pendingPaymentMethod = undefined;
+        message.pendingPaymentAmount = undefined;
+        message.pendingPaymentCreatedAt = undefined;
+
         await message.save();
 
         console.log('✅ Payment confirmed for message:', message._id);
@@ -1990,7 +2008,9 @@ app.post('/api/cashfree/webhook', async (req, res) => {
           method: 'cashfree'
         });
       } else {
-        console.log('⚠️ No matching message found for payment');
+        console.error('❌ Could not find message for payment');
+        console.error('   Order ID:', orderId);
+        console.error('   Customer ID:', webhookData.data.customer_details.customer_id);
       }
     }
 
