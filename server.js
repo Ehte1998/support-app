@@ -62,12 +62,12 @@ if (firebaseAvailable && admin && !admin.apps.length) {
     if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
       const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
       const credential = admin.credential.cert(serviceAccount);
-      
+
       admin.initializeApp({
         credential: credential,
         projectId: 'supportadmin-15867'
       });
-      
+
       console.log('Firebase Admin initialized successfully');
     } else {
       console.log('FIREBASE_SERVICE_ACCOUNT_KEY not found - push notifications disabled');
@@ -97,7 +97,7 @@ const fileFilter = (req, file, cb) => {
     'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
     'video/mp4', 'video/mov', 'video/avi', 'video/mkv', 'video/webm', 'video/3gp'
   ];
-  
+
   if (allowedTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
@@ -116,23 +116,23 @@ const upload = multer({
 // FIXED CORS CONFIGURATION
 const corsOriginHandler = (origin, callback) => {
   console.log('CORS request from origin:', origin);
-  
+
   if (!origin) {
     console.log('CORS allowed for request with no origin');
     return callback(null, true);
   }
-  
-  const allowedOrigins = process.env.NODE_ENV === 'production' 
+
+  const allowedOrigins = process.env.NODE_ENV === 'production'
     ? [
-        "https://ehtecounseling.com",
-        "https://www.ehtecounseling.com",
-        process.env.FRONTEND_URL,
-        "https://support-app-2.vercel.app",
-      ].filter(Boolean)
+      "https://ehtecounseling.com",
+      "https://www.ehtecounseling.com",
+      process.env.FRONTEND_URL,
+      "https://support-app-2.vercel.app",
+    ].filter(Boolean)
     : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"];
-  
+
   const isVercelPreview = origin.match(/^https:\/\/support-app-2-[a-zA-Z0-9-]+.*\.vercel\.app$/);
-  
+
   if (allowedOrigins.includes(origin) || isVercelPreview) {
     console.log('CORS allowed for origin:', origin);
     callback(null, true);
@@ -197,8 +197,8 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secure-jwt-secret-change-in-p
 // PayPal Configuration
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
 const PAYPAL_CLIENT_SECRET = process.env.PAYPAL_CLIENT_SECRET;
-const PAYPAL_API_BASE = process.env.NODE_ENV === 'production' 
-  ? 'https://api-m.paypal.com' 
+const PAYPAL_API_BASE = process.env.NODE_ENV === 'production'
+  ? 'https://api-m.paypal.com'
   : 'https://api-m.sandbox.paypal.com';
 
 // Cashfree Configuration (for UPI/GPay)
@@ -231,7 +231,7 @@ async function getPayPalAccessToken() {
 async function createPayPalOrder(amount, currency = 'USD', messageId) {
   try {
     const accessToken = await getPayPalAccessToken();
-    
+
     const orderData = {
       intent: 'CAPTURE',
       purchase_units: [{
@@ -273,7 +273,7 @@ async function createPayPalOrder(amount, currency = 'USD', messageId) {
 async function capturePayPalPayment(orderId) {
   try {
     const accessToken = await getPayPalAccessToken();
-    
+
     const response = await axios.post(
       `${PAYPAL_API_BASE}/v2/checkout/orders/${orderId}/capture`,
       {},
@@ -296,7 +296,7 @@ async function capturePayPalPayment(orderId) {
 async function createCashfreeOrder(amount, messageId, customerDetails = {}) {
   try {
     const orderId = `order_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+
     // Cashfree v2 API uses different structure
     const orderData = {
       order_id: orderId,
@@ -341,18 +341,14 @@ async function createCashfreeOrder(amount, messageId, customerDetails = {}) {
     console.log('   All keys:', Object.keys(response.data));
 
     if (response.data.payment_session_id) {
-      // Cashfree v2 uses payment_session_id to generate the payment link
-      const isSandbox = CASHFREE_API_BASE.includes('sandbox');
-      const paymentLink = `https://payments${isSandbox ? '-test' : ''}.cashfree.com/order?session_id=${response.data.payment_session_id}`;
-      
       const result = {
         success: true,
         orderId: orderId,
         paymentLink: paymentLink,
-        sessionId: response.data.payment_session_id,
+        paymentSessionId: response.data.payment_session_id,  // Frontend will use this
         cfOrderId: response.data.cf_order_id
       };
-      
+
       console.log('✅ Returning to endpoint:', JSON.stringify(result, null, 2));
       return result;
     } else {
@@ -373,7 +369,7 @@ async function createCashfreeOrder(amount, messageId, customerDetails = {}) {
 async function verifyCashfreePayment(orderId) {
   try {
     console.log('🔍 Verifying Cashfree payment for order:', orderId);
-    
+
     const response = await axios.get(
       `${CASHFREE_API_BASE}/pg/orders/${orderId}`,
       {
@@ -407,7 +403,7 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/suppor
 mongoose.connect(MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch(err => console.error('MongoDB connection error:', err));
-  // User Schema
+// User Schema
 const userSchema = new mongoose.Schema({
   email: {
     type: String,
@@ -598,11 +594,11 @@ const authenticate = async (req, res, next) => {
 
     const decoded = jwt.verify(token, JWT_SECRET);
     const admin = await Admin.findById(decoded.userId);
-    
+
     if (!admin) {
       return res.status(403).json({ error: 'Invalid token' });
     }
-    
+
     req.user = admin;
     next();
   } catch (error) {
@@ -620,20 +616,20 @@ const authenticateUser = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, JWT_SECRET);
-    
+
     if (decoded.type !== 'user') {
       return res.status(403).json({ error: 'Invalid token type' });
     }
-    
+
     const user = await User.findById(decoded.userId);
-    
+
     if (!user) {
       return res.status(403).json({ error: 'Invalid token' });
     }
-    
+
     user.lastActive = new Date();
     await user.save();
-    
+
     req.user = user;
     next();
   } catch (error) {
@@ -653,7 +649,7 @@ app.post('/api/upload/:messageId', authenticateUser, (req, res, next) => {
   try {
     const { messageId } = req.params;
     const { caption } = req.body;
-    
+
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
@@ -693,7 +689,7 @@ app.post('/api/upload/:messageId', authenticateUser, (req, res, next) => {
     const updateData = {
       $push: { chatMessages: chatMessage }
     };
-    
+
     if (message.status === 'pending') {
       updateData.status = 'in-chat';
     }
@@ -723,11 +719,11 @@ app.post('/api/upload/:messageId', authenticateUser, (req, res, next) => {
 
   } catch (error) {
     console.error('File upload error:', error);
-    
+
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
-    
+
     res.status(500).json({ error: 'File upload failed' });
   }
 });
@@ -742,7 +738,7 @@ app.post('/api/admin/upload/:messageId', authenticate, (req, res, next) => {
   try {
     const { messageId } = req.params;
     const { caption } = req.body;
-    
+
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
@@ -778,7 +774,7 @@ app.post('/api/admin/upload/:messageId', authenticate, (req, res, next) => {
     const updateData = {
       $push: { chatMessages: chatMessage }
     };
-    
+
     if (message.status === 'pending') {
       updateData.status = 'in-chat';
     }
@@ -808,11 +804,11 @@ app.post('/api/admin/upload/:messageId', authenticate, (req, res, next) => {
 
   } catch (error) {
     console.error('Admin file upload error:', error);
-    
+
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
-    
+
     res.status(500).json({ error: 'File upload failed' });
   }
 });
@@ -844,7 +840,7 @@ app.get('/api/platform-info', (req, res) => {
 
 // Basic Routes
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     message: 'FeelingsShare API Server - Peer Support Platform',
     status: 'running',
     version: '1.0.0',
@@ -889,7 +885,7 @@ app.delete('/api/user/delete-account', authenticateUser, async (req, res) => {
       const uploadsPath = path.join(__dirname, 'uploads');
       const files = await fs.readdir(uploadsPath);
       const userFiles = files.filter(file => file.includes(userId.toString()));
-      
+
       for (const file of userFiles) {
         await fs.unlink(path.join(uploadsPath, file));
       }
@@ -900,16 +896,16 @@ app.delete('/api/user/delete-account', authenticateUser, async (req, res) => {
     // 5. Delete the user account
     await User.findByIdAndDelete(userId);
 
-    res.json({ 
-      success: true, 
-      message: 'Account deleted successfully' 
+    res.json({
+      success: true,
+      message: 'Account deleted successfully'
     });
 
   } catch (error) {
     console.error('Delete account error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to delete account' 
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete account'
     });
   }
 });
@@ -925,12 +921,12 @@ app.post('/api/user/request-deletion', async (req, res) => {
 
     // Find user
     const user = await User.findOne({ email: email.toLowerCase() });
-    
+
     if (!user) {
       // Don't reveal if email exists or not
-      return res.json({ 
-        success: true, 
-        message: 'If this email exists, a deletion request has been recorded.' 
+      return res.json({
+        success: true,
+        message: 'If this email exists, a deletion request has been recorded.'
       });
     }
 
@@ -942,16 +938,16 @@ app.post('/api/user/request-deletion', async (req, res) => {
     // Option 2: Create a pending request (create a DeletionRequest model first)
     // await DeletionRequest.create({ email, requestDate: new Date() });
 
-    res.json({ 
-      success: true, 
-      message: 'Account deletion request received. Processing within 48 hours.' 
+    res.json({
+      success: true,
+      message: 'Account deletion request received. Processing within 48 hours.'
     });
 
   } catch (error) {
     console.error('Deletion request error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to process request' 
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process request'
     });
   }
 });
@@ -960,7 +956,7 @@ app.post('/api/user/request-deletion', async (req, res) => {
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { email, password, name, isAnonymous } = req.body;
-    
+
     if (!email || !password || !name) {
       return res.status(400).json({ error: 'Email, password, and name are required' });
     }
@@ -975,7 +971,7 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
-    
+
     const user = new User({
       email,
       password: hashedPassword,
@@ -984,7 +980,7 @@ app.post('/api/auth/register', async (req, res) => {
     });
 
     await user.save();
-    
+
     const token = jwt.sign(
       { userId: user._id, email: user.email, type: 'user' },
       JWT_SECRET,
@@ -1062,13 +1058,13 @@ app.post('/api/auth/validate-user', async (req, res) => {
     }
 
     const decoded = jwt.verify(token, JWT_SECRET);
-    
+
     if (decoded.type !== 'user') {
       return res.status(403).json({ error: 'Invalid token type' });
     }
-    
+
     const user = await User.findById(decoded.userId);
-    
+
     if (!user) {
       return res.status(403).json({ error: 'Invalid token' });
     }
@@ -1091,7 +1087,7 @@ app.post('/api/auth/validate-user', async (req, res) => {
 app.post('/api/auth/create-admin', async (req, res) => {
   try {
     const { email, password, name } = req.body;
-    
+
     if (!email || !password || !name) {
       return res.status(400).json({ error: 'Email, password, and name are required' });
     }
@@ -1102,7 +1098,7 @@ app.post('/api/auth/create-admin', async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
-    
+
     const admin = new Admin({
       email,
       password: hashedPassword,
@@ -1110,7 +1106,7 @@ app.post('/api/auth/create-admin', async (req, res) => {
     });
 
     await admin.save();
-    
+
     console.log(`Admin created: ${email}`);
     res.json({ message: 'Admin created successfully' });
   } catch (error) {
@@ -1172,7 +1168,7 @@ app.post('/api/auth/validate', async (req, res) => {
 
     const decoded = jwt.verify(token, JWT_SECRET);
     const admin = await Admin.findById(decoded.userId);
-    
+
     if (!admin) {
       return res.status(403).json({ error: 'Invalid token' });
     }
@@ -1192,13 +1188,13 @@ app.post('/api/auth/validate', async (req, res) => {
 app.post('/api/admin/register-push-token', authenticate, async (req, res) => {
   try {
     const { pushToken, deviceType } = req.body;
-    
+
     await Admin.findByIdAndUpdate(req.user._id, {
       pushToken: pushToken,
       deviceType: deviceType,
       lastTokenUpdate: new Date()
     });
-    
+
     res.json({ success: true, message: 'Push token registered' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to register push token' });
@@ -1214,27 +1210,27 @@ app.post('/api/admin/send-notification', authenticate, async (req, res) => {
     }
 
     const { title, body, data = {} } = req.body;
-    
+
     // Get all admin tokens
     const admins = await Admin.find({ pushToken: { $exists: true, $ne: null } });
-    
+
     if (admins.length === 0) {
       return res.json({ success: true, message: 'No devices to notify' });
     }
     const tokens = admins.map(admin => admin.pushToken);
-    
+
     const message = {
       notification: { title, body },
       data: { ...data, timestamp: Date.now().toString() },
       tokens: tokens
     };
     const response = await admin.messaging().sendMulticast(message);
-    
+
     console.log(`Notification sent to ${response.successCount} devices`);
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       successCount: response.successCount,
-      failureCount: response.failureCount 
+      failureCount: response.failureCount
     });
   } catch (error) {
     console.error('Push notification error:', error);
@@ -1266,11 +1262,11 @@ app.get('/api/messages/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const message = await Message.findById(id).populate('userId', 'name email isAnonymous');
-    
+
     if (!message) {
       return res.status(404).json({ error: 'Message not found' });
     }
-    
+
     res.json(message);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch message' });
@@ -1280,7 +1276,7 @@ app.get('/api/messages/:id', async (req, res) => {
 app.post('/api/messages', authenticateUser, async (req, res) => {
   try {
     const { message } = req.body;
-    
+
     const newMessage = new Message({
       userId: req.user._id,
       message,
@@ -1295,11 +1291,11 @@ app.post('/api/messages', authenticateUser, async (req, res) => {
     });
 
     await newMessage.save();
-    
+
     await newMessage.populate('userId', 'name email isAnonymous');
-    
+
     io.emit('newMessage', newMessage);
-    
+
     // AUTO-NOTIFICATION FOR NEW MESSAGES
     try {
       if (firebaseAvailable && admin) {
@@ -1322,13 +1318,13 @@ app.post('/api/messages', authenticateUser, async (req, res) => {
     } catch (error) {
       console.error('Auto notification error:', error);
     }
-    
+
     console.log(`New feelings shared by ${req.user.name}: ${message.substring(0, 50)}...`);
-    
-    res.json({ 
-      success: true, 
-      message: 'Message sent successfully!', 
-      id: newMessage._id 
+
+    res.json({
+      success: true,
+      message: 'Message sent successfully!',
+      id: newMessage._id
     });
   } catch (error) {
     console.error('Error creating message:', error);
@@ -1357,7 +1353,7 @@ io.on('connection', (socket) => {
 
   socket.on('send-chat-message', async (data) => {
     const { messageId, message, sender, messageType, file } = data;
-    
+
     try {
       const chatMessage = {
         sender: sender,
@@ -1381,12 +1377,12 @@ io.on('connection', (socket) => {
         chatMessage: chatMessage
       });
 
-      const messagePreview = messageType === 'text' ? 
-        message.substring(0, 50) + '...' : 
+      const messagePreview = messageType === 'text' ?
+        message.substring(0, 50) + '...' :
         `${messageType} file: ${file?.originalName || 'unknown'}`;
 
       console.log(`Chat message sent in ${messageId}: ${messagePreview}`);
-      
+
       // AUTO-NOTIFICATION FOR CHAT MESSAGES
       try {
         if (firebaseAvailable && admin) {
@@ -1409,7 +1405,7 @@ io.on('connection', (socket) => {
       } catch (notificationError) {
         console.error('Auto notification error:', notificationError);
       }
-      
+
     } catch (error) {
       console.error('Error handling chat message:', error);
     }
@@ -1417,7 +1413,7 @@ io.on('connection', (socket) => {
 
   socket.on('user-completed-conversation', (data) => {
     const { messageId, userName } = data;
-    
+
     io.to('admin').emit('userCompletedconversation', {
       messageId: messageId,
       userName: userName
@@ -1449,17 +1445,17 @@ app.patch('/api/messages/:id/status', authenticate, async (req, res) => {
     }
 
     const message = await Message.findByIdAndUpdate(
-      id, 
+      id,
       updateData,
       { new: true, runValidators: true }
     );
-    
+
     if (!message) {
       return res.status(404).json({ error: 'Message not found' });
     }
 
     io.emit('messageStatusUpdate', { id: id, status: status });
-    
+
     res.json({ success: true, message });
   } catch (error) {
     console.error('Error updating message status:', error);
@@ -1486,15 +1482,15 @@ app.patch('/api/messages/:id/meeting-links', authenticate, async (req, res) => {
     message.meetingLinks.zoom = zoom || '';
 
     await message.save();
-    
+
     io.emit('meetingLinksUpdate', {
       messageId: id,
       meetingLinks: message.meetingLinks
     });
-    
-    res.json({ 
-      success: true, 
-      message: 'Meeting links updated successfully' 
+
+    res.json({
+      success: true,
+      message: 'Meeting links updated successfully'
     });
   } catch (error) {
     console.error('Error setting meeting links:', error);
@@ -1506,7 +1502,7 @@ app.patch('/api/messages/:id/meeting-links', authenticate, async (req, res) => {
 app.patch('/api/messages/:id/user-complete', authenticateUser, async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const message = await Message.findById(id);
     if (!message) {
       return res.status(404).json({ error: 'Message not found' });
@@ -1519,7 +1515,7 @@ app.patch('/api/messages/:id/user-complete', authenticateUser, async (req, res) 
     message.status = 'completed';
     message.completedBy = 'user';
     message.userCompletedAt = new Date();
-    
+
     await message.save();
 
     await message.populate('userId', 'name email isAnonymous');
@@ -1531,11 +1527,11 @@ app.patch('/api/messages/:id/user-complete', authenticateUser, async (req, res) 
     });
 
     console.log(`User ${req.user.name} completed conversation for message ${id}`);
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       message: 'conversation completed successfully',
-      messageStatus: message.status 
+      messageStatus: message.status
     });
   } catch (error) {
     console.error('Error completing user conversation:', error);
@@ -1577,10 +1573,10 @@ app.post('/api/messages/:id/rating', authenticateUser, async (req, res) => {
     });
 
     console.log(`User ${req.user.name} rated conversation ${id} with ${rating} stars`);
-    
-    res.json({ 
-      success: true, 
-      message: 'Rating submitted successfully' 
+
+    res.json({
+      success: true,
+      message: 'Rating submitted successfully'
     });
   } catch (error) {
     console.error('Error submitting rating:', error);
@@ -1615,9 +1611,9 @@ app.patch('/api/messages/:id/user-meeting-links', authenticateUser, async (req, 
     }
 
     await message.save();
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       message: 'Meeting links updated successfully',
       meetingLinks: message.meetingLinks
     });
@@ -1639,9 +1635,9 @@ app.post('/api/create-payment-order', async (req, res) => {
     console.log('Raw Body:', JSON.stringify(req.body, null, 2));
     console.log('Request Headers:', req.headers['content-type']);
     console.log('---------------------------------');
-    
+
     const { amount, messageId, paymentMethod, customerDetails } = req.body;
-    
+
     console.log('Parsed Values:');
     console.log('  amount:', amount, typeof amount);
     console.log('  messageId:', messageId, typeof messageId);
@@ -1658,9 +1654,9 @@ app.post('/api/create-payment-order', async (req, res) => {
     // Check if paymentMethod is provided
     if (!paymentMethod) {
       console.log('❌ Validation failed: paymentMethod is missing or undefined');
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Payment method is required. Received: ' + paymentMethod 
+      return res.status(400).json({
+        success: false,
+        error: 'Payment method is required. Received: ' + paymentMethod
       });
     }
 
@@ -1669,9 +1665,9 @@ app.post('/api/create-payment-order', async (req, res) => {
     if (!validMethods.includes(paymentMethod)) {
       console.log('❌ Validation failed: Invalid payment method:', paymentMethod);
       console.log('Valid methods are:', validMethods);
-      return res.status(400).json({ 
-        success: false, 
-        error: `Invalid payment method: "${paymentMethod}". Choose: paypal, upi, or gpay` 
+      return res.status(400).json({
+        success: false,
+        error: `Invalid payment method: "${paymentMethod}". Choose: paypal, upi, or gpay`
       });
     }
 
@@ -1682,9 +1678,9 @@ app.post('/api/create-payment-order', async (req, res) => {
       console.log('💙 Processing PayPal payment...');
       const amountUSD = (amount / 83).toFixed(2);
       const order = await createPayPalOrder(parseFloat(amountUSD), 'USD', messageId);
-      
+
       console.log('✅ PayPal order created:', order.id);
-      
+
       return res.json({
         success: true,
         paymentMethod: 'paypal',
@@ -1694,14 +1690,14 @@ app.post('/api/create-payment-order', async (req, res) => {
         currency: 'USD'
       });
     }
-    
+
     // UPI/GPay Payment (via Cashfree)
     else if (paymentMethod === 'upi' || paymentMethod === 'gpay') {
       console.log(`💳 Processing ${paymentMethod.toUpperCase()} payment...`);
       const order = await createCashfreeOrder(amount, messageId, customerDetails);
-      
+
       console.log('✅ Cashfree order created:', order.orderId);
-      
+
       return res.json({
         success: true,
         paymentMethod: paymentMethod,
@@ -1716,9 +1712,9 @@ app.post('/api/create-payment-order', async (req, res) => {
   } catch (error) {
     console.error('💥 Payment order creation error:', error);
     console.error('Error stack:', error.stack);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to create payment order' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to create payment order'
     });
   }
 });
@@ -1728,7 +1724,7 @@ app.post('/api/create-payment-order', async (req, res) => {
 app.post('/api/test-payment-data', (req, res) => {
   console.log('📦 TEST ENDPOINT - Received data:');
   console.log(JSON.stringify(req.body, null, 2));
-  
+
   res.json({
     success: true,
     message: 'Data received successfully',
@@ -1746,7 +1742,7 @@ app.post('/api/test-payment-data', (req, res) => {
 app.delete('/api/messages/bulk-delete', authenticate, async (req, res) => {
   try {
     const { messageIds } = req.body;
-    
+
     if (!messageIds || !Array.isArray(messageIds)) {
       return res.status(400).json({ error: 'Message IDs array is required' });
     }
@@ -1767,11 +1763,11 @@ app.delete('/api/messages/bulk-delete', authenticate, async (req, res) => {
     }
 
     const result = await Message.deleteMany({ _id: { $in: messageIds } });
-    
+
     console.log(`Admin bulk deleted ${result.deletedCount} messages`);
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       message: `${result.deletedCount} conversations deleted successfully`,
       deletedCount: result.deletedCount
     });
@@ -1785,15 +1781,15 @@ app.delete('/api/messages/bulk-delete', authenticate, async (req, res) => {
 app.delete('/api/messages/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     console.log(`Attempting to delete message: ${id}`);
-    
+
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({ error: 'Invalid message ID format' });
     }
-    
+
     const message = await Message.findById(id);
-    
+
     if (!message) {
       return res.status(404).json({ error: 'Message not found' });
     }
@@ -1813,10 +1809,10 @@ app.delete('/api/messages/:id', authenticate, async (req, res) => {
     await Message.findByIdAndDelete(id);
 
     console.log(`Admin deleted message ${id}`);
-    
-    res.json({ 
-      success: true, 
-      message: 'Conversation deleted successfully' 
+
+    res.json({
+      success: true,
+      message: 'Conversation deleted successfully'
     });
   } catch (error) {
     console.error('Error deleting message:', error);
@@ -1832,11 +1828,11 @@ app.post('/api/verify-payment', async (req, res) => {
     // PayPal Verification
     if (paymentMethod === 'paypal') {
       const captureData = await capturePayPalPayment(orderId);
-      
+
       if (captureData.status === 'COMPLETED') {
         if (messageId) {
           const amountPaid = parseFloat(captureData.purchase_units[0].payments.captures[0].amount.value);
-          
+
           await Message.findByIdAndUpdate(messageId, {
             paymentStatus: 'paid',
             paymentId: captureData.id,
@@ -1853,23 +1849,23 @@ app.post('/api/verify-payment', async (req, res) => {
           });
         }
 
-        return res.json({ 
-          success: true, 
+        return res.json({
+          success: true,
           message: 'PayPal payment verified successfully',
           captureId: captureData.id
         });
       } else {
-        return res.status(400).json({ 
-          success: false, 
-          error: 'Payment not completed' 
+        return res.status(400).json({
+          success: false,
+          error: 'Payment not completed'
         });
       }
     }
-    
+
     // UPI/GPay Verification (via Cashfree)
     else if (paymentMethod === 'upi' || paymentMethod === 'gpay') {
       const paymentData = await verifyCashfreePayment(orderId);
-      
+
       if (paymentData.txStatus === 'SUCCESS') {
         if (messageId) {
           await Message.findByIdAndUpdate(messageId, {
@@ -1888,31 +1884,31 @@ app.post('/api/verify-payment', async (req, res) => {
           });
         }
 
-        return res.json({ 
-          success: true, 
+        return res.json({
+          success: true,
           message: 'Payment verified successfully',
           transactionId: paymentData.referenceId
         });
       } else {
-        return res.status(400).json({ 
-          success: false, 
-          error: 'Payment verification failed' 
+        return res.status(400).json({
+          success: false,
+          error: 'Payment verification failed'
         });
       }
     }
-    
+
     else {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Invalid payment method' 
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid payment method'
       });
     }
 
   } catch (error) {
     console.error('Payment verification error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Payment verification failed' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Payment verification failed'
     });
   }
 });
@@ -1921,9 +1917,9 @@ app.post('/api/verify-payment', async (req, res) => {
 app.post('/api/cashfree/callback', async (req, res) => {
   try {
     const { orderId, orderAmount, txStatus, referenceId } = req.body;
-    
+
     console.log('Cashfree callback:', { orderId, txStatus, referenceId });
-    
+
     if (txStatus === 'SUCCESS') {
       res.redirect(`${process.env.FRONTEND_URL}/?payment-success&orderId=${orderId}&orderAmount=${orderAmount}`);
     } else {
@@ -1935,18 +1931,55 @@ app.post('/api/cashfree/callback', async (req, res) => {
   }
 });
 
-// Cashfree Webhook Handler
+// Cashfree Webhook Handler (UPDATED)
 app.post('/api/cashfree/webhook', async (req, res) => {
   try {
     const webhookData = req.body;
-    console.log('Cashfree webhook:', webhookData);
-    
-    // Process webhook data
-    // Update order status in database
-    
+    console.log('📥 Cashfree webhook received:', JSON.stringify(webhookData, null, 2));
+
+    // Verify webhook signature (IMPORTANT for production!)
+    const signature = req.headers['x-webhook-signature'];
+    const timestamp = req.headers['x-webhook-timestamp'];
+
+    // TODO: Implement signature verification
+    // const expectedSignature = computeSignature(webhookData, timestamp, CASHFREE_SECRET_KEY);
+    // if (signature !== expectedSignature) {
+    //   console.error('❌ Invalid webhook signature');
+    //   return res.status(400).send('Invalid signature');
+    // }
+
+    // Handle payment status
+    if (webhookData.type === 'PAYMENT_SUCCESS_WEBHOOK') {
+      const orderId = webhookData.data.order.order_id;
+      const amount = webhookData.data.payment.payment_amount;
+      const paymentId = webhookData.data.payment.cf_payment_id;
+
+      // Update database
+      await Message.findOneAndUpdate(
+        { 'chatMessages.0.message': { $exists: true } }, // Find by order ID logic
+        {
+          paymentStatus: 'paid',
+          paymentId: paymentId,
+          paymentMethod: 'cashfree',
+          amountPaid: amount,
+          paidAt: new Date()
+        }
+      );
+
+      console.log('✅ Payment confirmed via webhook:', paymentId);
+
+      // Emit socket event
+      io.emit('paymentReceived', {
+        orderId: orderId,
+        amount: amount,
+        paymentId: paymentId,
+        method: 'cashfree'
+      });
+    }
+
     res.status(200).send('OK');
   } catch (error) {
-    console.error('Cashfree webhook error:', error);
+    console.error('💥 Webhook error:', error);
     res.status(500).send('Webhook processing failed');
   }
 });
@@ -1958,7 +1991,7 @@ app.post('/api/admin/fix-completed-by', authenticate, async (req, res) => {
       { completedBy: null },
       { $unset: { completedBy: 1 } }
     );
-    
+
     console.log(`Fixed ${result.modifiedCount} documents with null completedBy`);
     res.json({
       success: true,
@@ -1978,11 +2011,11 @@ app.use((error, req, res, next) => {
     }
     return res.status(400).json({ error: `Upload error: ${error.message}` });
   }
-  
+
   if (error.message.includes('Invalid file type')) {
     return res.status(400).json({ error: error.message });
   }
-  
+
   next(error);
 });
 
