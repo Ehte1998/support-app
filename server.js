@@ -309,8 +309,8 @@ async function createCashfreeOrder(amount, messageId, customerDetails = {}) {
         customer_phone: customerDetails.phone || '9999999999'
       },
       order_meta: {
-        return_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/?payment-success&order_id={order_id}`,
-        notify_url: `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/cashfree/webhook`
+        return_url: `https://ehtecounseling.com/?payment-success&order_id={order_id}`,
+        notify_url: `https://support-app-1-m6kf.onrender.com/api/cashfree/webhook`
       },
       order_note: 'Peer Support Platform Contribution'
     };
