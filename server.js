@@ -246,8 +246,8 @@ async function createPayPalOrder(amount, currency = 'USD', messageId) {
         brand_name: 'FeelingsShare',
         landing_page: 'NO_PREFERENCE',
         user_action: 'PAY_NOW',
-        return_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/?payment-success`,
-        cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/?payment-cancel`
+        return_url: `${process.env.FRONTEND_URL || 'https://ehtecounseling.com'}/?payment-success`,
+        cancel_url: `${process.env.FRONTEND_URL || 'https://ehtecounseling.com'}/?payment-cancel`
       }
     };
 
