@@ -344,7 +344,6 @@ async function createCashfreeOrder(amount, messageId, customerDetails = {}) {
       const result = {
         success: true,
         orderId: orderId,
-        paymentLink: paymentLink,
         paymentSessionId: response.data.payment_session_id,  // Frontend will use this
         cfOrderId: response.data.cf_order_id
       };
@@ -1702,7 +1701,6 @@ app.post('/api/create-payment-order', async (req, res) => {
         success: true,
         paymentMethod: paymentMethod,
         orderId: order.orderId,
-        paymentLink: order.paymentLink,
         orderToken: order.orderToken,
         amount: amount,
         currency: 'INR'
