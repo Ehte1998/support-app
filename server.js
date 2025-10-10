@@ -1822,32 +1822,37 @@ app.delete('/api/messages/:id', authenticate, async (req, res) => {
 // Verify Payment - Multi-Gateway
 app.post('/api/verify-payment', async (req, res) => {
   try {
-    const { paymentMethod, orderId, messageId, amount } = req.body;
+    const { paymentMethod, orderId, messageId } = req.body;
+
+    console.log('🔍 Verifying payment:', { paymentMethod, orderId, messageId });
+
+    // UPI/GPay Verification (via Cashfree)
+    if (paymentMethod === 'upi' || paymentMethod === 'gpay') {
+      const paymentData = await verifyCashfreePayment(orderId);
+
+      console.log('📥 Cashfree payment data:', paymentData);
+
+      if (paymentData.orderStatus === 'PAID') {
+        return res.json({
+          success: true,
+          message: 'Payment verified successfully',
+          transactionId: paymentData.referenceId,
+          amount: paymentData.orderAmount
+        });
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: 'Payment not completed yet',
+          status: paymentData.orderStatus
+        });
+      }
+    }
 
     // PayPal Verification
-    if (paymentMethod === 'paypal') {
+    else if (paymentMethod === 'paypal') {
       const captureData = await capturePayPalPayment(orderId);
 
       if (captureData.status === 'COMPLETED') {
-        if (messageId) {
-          const amountPaid = parseFloat(captureData.purchase_units[0].payments.captures[0].amount.value);
-
-          await Message.findByIdAndUpdate(messageId, {
-            paymentStatus: 'paid',
-            paymentId: captureData.id,
-            paymentMethod: 'paypal',
-            amountPaid: amountPaid,
-            paidAt: new Date()
-          });
-
-          io.emit('paymentReceived', {
-            messageId: messageId,
-            amount: amountPaid,
-            paymentId: captureData.id,
-            method: 'paypal'
-          });
-        }
-
         return res.json({
           success: true,
           message: 'PayPal payment verified successfully',
@@ -1861,41 +1866,6 @@ app.post('/api/verify-payment', async (req, res) => {
       }
     }
 
-    // UPI/GPay Verification (via Cashfree)
-    else if (paymentMethod === 'upi' || paymentMethod === 'gpay') {
-      const paymentData = await verifyCashfreePayment(orderId);
-
-      if (paymentData.txStatus === 'SUCCESS') {
-        if (messageId) {
-          await Message.findByIdAndUpdate(messageId, {
-            paymentStatus: 'paid',
-            paymentId: paymentData.referenceId,
-            paymentMethod: paymentMethod,
-            amountPaid: parseFloat(paymentData.orderAmount),
-            paidAt: new Date()
-          });
-
-          io.emit('paymentReceived', {
-            messageId: messageId,
-            amount: parseFloat(paymentData.orderAmount),
-            paymentId: paymentData.referenceId,
-            method: paymentMethod
-          });
-        }
-
-        return res.json({
-          success: true,
-          message: 'Payment verified successfully',
-          transactionId: paymentData.referenceId
-        });
-      } else {
-        return res.status(400).json({
-          success: false,
-          error: 'Payment verification failed'
-        });
-      }
-    }
-
     else {
       return res.status(400).json({
         success: false,
@@ -1904,29 +1874,11 @@ app.post('/api/verify-payment', async (req, res) => {
     }
 
   } catch (error) {
-    console.error('Payment verification error:', error);
+    console.error('💥 Payment verification error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Payment verification failed'
     });
-  }
-});
-
-// Cashfree Callback Handler
-app.post('/api/cashfree/callback', async (req, res) => {
-  try {
-    const { orderId, orderAmount, txStatus, referenceId } = req.body;
-
-    console.log('Cashfree callback:', { orderId, txStatus, referenceId });
-
-    if (txStatus === 'SUCCESS') {
-      res.redirect(`${process.env.FRONTEND_URL}/?payment-success&orderId=${orderId}&orderAmount=${orderAmount}`);
-    } else {
-      res.redirect(`${process.env.FRONTEND_URL}/?payment-failed&orderId=${orderId}`);
-    }
-  } catch (error) {
-    console.error('Cashfree callback error:', error);
-    res.status(500).send('Callback processing failed');
   }
 });
 
@@ -1940,40 +1892,50 @@ app.post('/api/cashfree/webhook', async (req, res) => {
     const signature = req.headers['x-webhook-signature'];
     const timestamp = req.headers['x-webhook-timestamp'];
 
-    // TODO: Implement signature verification
-    // const expectedSignature = computeSignature(webhookData, timestamp, CASHFREE_SECRET_KEY);
-    // if (signature !== expectedSignature) {
-    //   console.error('❌ Invalid webhook signature');
-    //   return res.status(400).send('Invalid signature');
-    // }
-
     // Handle payment status
     if (webhookData.type === 'PAYMENT_SUCCESS_WEBHOOK') {
       const orderId = webhookData.data.order.order_id;
       const amount = webhookData.data.payment.payment_amount;
       const paymentId = webhookData.data.payment.cf_payment_id;
+      const customerId = webhookData.data.customer_details.customer_id;
 
-      // Update database
-      await Message.findOneAndUpdate(
-        { 'chatMessages.0.message': { $exists: true } }, // Find by order ID logic
-        {
-          paymentStatus: 'paid',
+      console.log('🔍 Looking for message with customer:', customerId);
+
+      // Extract timestamp from customer_id (customer_1760104415218)
+      const timestamp = customerId.replace('customer_', '');
+
+      // Find message created around that time (within 5 minutes)
+      const timeWindow = 5 * 60 * 1000; // 5 minutes in milliseconds
+      const messageTime = parseInt(timestamp);
+
+      const message = await Message.findOne({
+        timestamp: {
+          $gte: new Date(messageTime - timeWindow),
+          $lte: new Date(messageTime + timeWindow)
+        },
+        paymentStatus: { $ne: 'paid' }
+      }).sort({ timestamp: -1 });
+
+      if (message) {
+        message.paymentStatus = 'paid';
+        message.paymentId = paymentId;
+        message.paymentMethod = 'cashfree';
+        message.amountPaid = amount;
+        message.paidAt = new Date();
+        await message.save();
+
+        console.log('✅ Payment confirmed for message:', message._id);
+
+        // Emit socket event
+        io.emit('paymentReceived', {
+          messageId: message._id.toString(),
+          amount: amount,
           paymentId: paymentId,
-          paymentMethod: 'cashfree',
-          amountPaid: amount,
-          paidAt: new Date()
-        }
-      );
-
-      console.log('✅ Payment confirmed via webhook:', paymentId);
-
-      // Emit socket event
-      io.emit('paymentReceived', {
-        orderId: orderId,
-        amount: amount,
-        paymentId: paymentId,
-        method: 'cashfree'
-      });
+          method: 'cashfree'
+        });
+      } else {
+        console.log('⚠️ No matching message found for payment');
+      }
     }
 
     res.status(200).send('OK');
