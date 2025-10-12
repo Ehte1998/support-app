@@ -387,8 +387,11 @@ async function verifyCashfreePayment(orderId) {
       orderId: response.data.order_id,
       orderAmount: response.data.order_amount,
       orderStatus: response.data.order_status,
-      txStatus: response.data.order_status === 'PAID' ? 'SUCCESS' : 'FAILED',
-      referenceId: response.data.cf_order_id
+      orderToken: response.data.order_token,
+      txStatus: response.data.order_status === 'PAID' ? 'SUCCESS' : response.data.order_status,
+      referenceId: response.data.cf_order_id,
+      paymentMethod: response.data.payment_method,
+      paymentTime: response.data.payment_completion_time
     };
   } catch (error) {
     console.error('💥 Cashfree verification error:', error.response?.data || error.message);
@@ -1900,7 +1903,17 @@ app.post('/api/verify-payment', async (req, res) => {
           transactionId: paymentData.referenceId,
           amount: paymentData.orderAmount
         });
-      } else {
+      }
+      else if (paymentData.orderStatus === 'ACTIVE') {
+        console.log('⏳ Payment is still ACTIVE - may need to wait');
+        return res.status(202).json({
+          success: false,
+          status: 'ACTIVE',
+          message: 'Payment is still processing',
+          error: 'Payment not completed yet'
+        });
+      }
+      else {
         return res.status(400).json({
           success: false,
           error: 'Payment not completed yet',
