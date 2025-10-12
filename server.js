@@ -365,12 +365,20 @@ async function createCashfreeOrder(amount, messageId, customerDetails = {}) {
 }
 
 // Verify Cashfree Payment (v2 API)
+// Verify Cashfree Payment (v2 API)
 async function verifyCashfreePayment(orderId) {
   try {
-    console.log('🔍 Verifying Cashfree payment for order:', orderId);
+    console.log('==========================================');
+    console.log('🔍 CASHFREE VERIFICATION DEBUG');
+    console.log('==========================================');
+    console.log('Order ID:', orderId);
+    console.log('API Base:', CASHFREE_API_BASE);
+    console.log('Full URL:', `${CASHFREE_API_BASE}/orders/${orderId}`);
+    console.log('App ID:', CASHFREE_APP_ID ? 'SET' : 'MISSING');
+    console.log('Secret Key:', CASHFREE_SECRET_KEY ? 'SET (hidden)' : 'MISSING');
 
     const response = await axios.get(
-      `${CASHFREE_API_BASE}/pg/orders/${orderId}`,
+      `${CASHFREE_API_BASE}/orders/${orderId}`,
       {
         headers: {
           'Content-Type': 'application/json',
@@ -381,7 +389,10 @@ async function verifyCashfreePayment(orderId) {
       }
     );
 
-    console.log('📥 Cashfree verification response:', JSON.stringify(response.data, null, 2));
+    console.log('📥 Cashfree Raw Response:');
+    console.log('   Status Code:', response.status);
+    console.log('   Response Data:', JSON.stringify(response.data, null, 2));
+    console.log('==========================================');
 
     return {
       orderId: response.data.order_id,
@@ -394,8 +405,12 @@ async function verifyCashfreePayment(orderId) {
       paymentTime: response.data.payment_completion_time
     };
   } catch (error) {
-    console.error('💥 Cashfree verification error:', error.response?.data || error.message);
-    throw new Error('Failed to verify Cashfree payment');
+    console.error('💥 Cashfree verification error:');
+    console.error('   Error Message:', error.message);
+    console.error('   Response Status:', error.response?.status);
+    console.error('   Response Data:', JSON.stringify(error.response?.data, null, 2));
+    console.error('==========================================');
+    throw new Error(error.response?.data?.message || 'Failed to verify Cashfree payment');
   }
 }
 
@@ -1880,44 +1895,59 @@ app.post('/api/verify-payment', async (req, res) => {
 
     // UPI/GPay Verification (via Cashfree)
     if (paymentMethod === 'upi' || paymentMethod === 'gpay') {
-      const paymentData = await verifyCashfreePayment(orderId);
+      try {
+        console.log('🔍 Starting Cashfree verification...');
+        const paymentData = await verifyCashfreePayment(orderId);
 
-      console.log('📥 Cashfree payment data:', paymentData);
+        console.log('📊 Cashfree Status Check:');
+        console.log('   orderStatus:', paymentData.orderStatus);
+        console.log('   txStatus:', paymentData.txStatus);
+        console.log('   orderAmount:', paymentData.orderAmount);
+        console.log('   referenceId:', paymentData.referenceId);
 
-      if (paymentData.orderStatus === 'PAID') {
-        // Clear pending payment data
-        if (messageId) {
-          await Message.findByIdAndUpdate(messageId, {
-            $unset: {
-              pendingPaymentOrderId: 1,
-              pendingPaymentMethod: 1,
-              pendingPaymentAmount: 1,
-              pendingPaymentCreatedAt: 1
-            }
+        if (paymentData.orderStatus === 'PAID') {
+          console.log('✅ Payment is PAID - clearing pending data');
+
+          if (messageId) {
+            await Message.findByIdAndUpdate(messageId, {
+              $unset: {
+                pendingPaymentOrderId: 1,
+                pendingPaymentMethod: 1,
+                pendingPaymentAmount: 1,
+                pendingPaymentCreatedAt: 1
+              }
+            });
+          }
+
+          return res.json({
+            success: true,
+            message: 'Payment verified successfully',
+            transactionId: paymentData.referenceId,
+            amount: paymentData.orderAmount
           });
         }
-
-        return res.json({
-          success: true,
-          message: 'Payment verified successfully',
-          transactionId: paymentData.referenceId,
-          amount: paymentData.orderAmount
-        });
-      }
-      else if (paymentData.orderStatus === 'ACTIVE') {
-        console.log('⏳ Payment is still ACTIVE - may need to wait');
-        return res.status(202).json({
+        else if (paymentData.orderStatus === 'ACTIVE') {
+          console.log('⏳ Payment is ACTIVE - needs more time');
+          return res.status(202).json({
+            success: false,
+            status: 'ACTIVE',
+            message: 'Payment is still processing',
+            error: 'Payment not completed yet'
+          });
+        }
+        else {
+          console.log(`❌ Payment status is: ${paymentData.orderStatus}`);
+          return res.status(400).json({
+            success: false,
+            error: 'Payment not completed yet',
+            status: paymentData.orderStatus
+          });
+        }
+      } catch (error) {
+        console.error('💥 Verification error:', error.message);
+        return res.status(500).json({
           success: false,
-          status: 'ACTIVE',
-          message: 'Payment is still processing',
-          error: 'Payment not completed yet'
-        });
-      }
-      else {
-        return res.status(400).json({
-          success: false,
-          error: 'Payment not completed yet',
-          status: paymentData.orderStatus
+          error: error.message || 'Failed to verify payment'
         });
       }
     }
