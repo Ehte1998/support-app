@@ -204,7 +204,7 @@ const PAYPAL_API_BASE = process.env.NODE_ENV === 'production'
 // Cashfree Configuration (for UPI/GPay)
 const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
 const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
-const CASHFREE_API_BASE = process.env.CASHFREE_API_BASE || 'https://sandbox.cashfree.com';
+const CASHFREE_API_BASE = process.env.CASHFREE_API_BASE || 'https://api.cashfree.com';
 
 // PayPal Access Token Function
 async function getPayPalAccessToken() {
