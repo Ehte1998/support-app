@@ -373,12 +373,12 @@ async function verifyCashfreePayment(orderId) {
     console.log('==========================================');
     console.log('Order ID:', orderId);
     console.log('API Base:', CASHFREE_API_BASE);
-    console.log('Full URL:', `${CASHFREE_API_BASE}/orders/${orderId}`);
+    console.log('Full URL:', `${CASHFREE_API_BASE}/pg/orders/${orderId}`);
     console.log('App ID:', CASHFREE_APP_ID ? 'SET' : 'MISSING');
     console.log('Secret Key:', CASHFREE_SECRET_KEY ? 'SET (hidden)' : 'MISSING');
 
     const response = await axios.get(
-      `${CASHFREE_API_BASE}/orders/${orderId}`,
+      `${CASHFREE_API_BASE}/pg/orders/${orderId}`,
       {
         headers: {
           'Content-Type': 'application/json',
