@@ -844,12 +844,9 @@ app.get('/api/platform-info', (req, res) => {
     platformType: 'peer_support',
     disclaimer: {
       title: 'Peer Support Platform',
-      message: 'This is a peer support platform where you can share your feelings with caring listeners. This is NOT professional therapy or medical advice. Listeners are volunteers, not licensed professionals. For emergencies, please contact crisis services immediately.',
+      message: 'This is a peer support platform where you can share your feelings with a caring listener.',
       emergencyResources: [
         { name: 'Emergency Services', number: '112', type: 'emergency' },
-        { name: 'KIRAN Mental Health', number: '1800-599-0019', type: 'mental_health' },
-        { name: 'AASRA Suicide Prevention', number: '91-22-27546669', type: 'crisis' },
-        { name: 'Vandrevala Foundation', number: '1860-2662-345', type: 'crisis' }
       ]
     },
     features: [
@@ -1745,6 +1742,8 @@ app.post('/api/create-payment-order', async (req, res) => {
         paymentMethod: paymentMethod,
         orderId: order.orderId,
         paymentSessionId: order.paymentSessionId,  // ✅ Change this!
+        payment_session_id: order.paymentSessionId,
+        sessionId: order.paymentSessionId,    
         cfOrderId: order.cfOrderId,
         amount: amount,
         currency: 'INR'
