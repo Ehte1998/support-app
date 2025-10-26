@@ -584,8 +584,13 @@ const messageSchema = new mongoose.Schema({
 
   paymentStatus: {
     type: String,
-    enum: ['unpaid', 'paid'],
-    default: 'unpaid'
+    enum: ['pending', 'paid', 'failed', 'unpaid'],  // ✅ ADD 'pending', 'failed'
+    default: 'pending'  // ✅ CHANGE from 'unpaid' to 'pending'
+  },
+  paymentMethod: {  // ✅ ADD THIS NEW FIELD
+    type: String,
+    enum: ['paypal', 'upi', 'gpay', null],
+    default: null
   },
   paymentId: String,
   amountPaid: Number,
@@ -1694,13 +1699,31 @@ app.post('/api/create-payment-order', async (req, res) => {
 
     console.log('✅ Validation passed. Creating payment order...');
 
-    // PayPal Payment
+    // PayPal Payment - FIXED
     if (paymentMethod === 'paypal') {
       console.log('💙 Processing PayPal payment...');
       const amountUSD = (amount / 83).toFixed(2);
       const order = await createPayPalOrder(parseFloat(amountUSD), 'USD', messageId);
 
       console.log('✅ PayPal order created:', order.id);
+
+      // ✅ FIX: Store PayPal order in database
+      if (messageId) {
+        try {
+          await Message.findByIdAndUpdate(messageId, {
+            $set: {
+              paypalOrderId: order.id,
+              pendingPaymentOrderId: order.id,
+              pendingPaymentMethod: 'paypal',
+              pendingPaymentAmount: amountUSD,
+              pendingPaymentCreatedAt: new Date()
+            }
+          });
+          console.log('💾 Stored PayPal order in database for message:', messageId);
+        } catch (err) {
+          console.error('⚠️ Failed to store PayPal order:', err);
+        }
+      }
 
       return res.json({
         success: true,
@@ -1743,7 +1766,7 @@ app.post('/api/create-payment-order', async (req, res) => {
         orderId: order.orderId,
         paymentSessionId: order.paymentSessionId,  // ✅ Change this!
         payment_session_id: order.paymentSessionId,
-        sessionId: order.paymentSessionId,    
+        sessionId: order.paymentSessionId,
         cfOrderId: order.cfOrderId,
         amount: amount,
         currency: 'INR'
@@ -1952,22 +1975,40 @@ app.post('/api/verify-payment', async (req, res) => {
       }
     }
 
-    // PayPal Verification
-    else if (paymentMethod === 'paypal') {
-      const captureData = await capturePayPalPayment(orderId);
+    // PayPal Payment - FIXED
+    if (paymentMethod === 'paypal') {
+      console.log('💙 Processing PayPal payment...');
+      const amountUSD = (amount / 83).toFixed(2);
+      const order = await createPayPalOrder(parseFloat(amountUSD), 'USD', messageId);
 
-      if (captureData.status === 'COMPLETED') {
-        return res.json({
-          success: true,
-          message: 'PayPal payment verified successfully',
-          captureId: captureData.id
-        });
-      } else {
-        return res.status(400).json({
-          success: false,
-          error: 'Payment not completed'
-        });
+      console.log('✅ PayPal order created:', order.id);
+
+      // ✅ FIX: Store PayPal order in database
+      if (messageId) {
+        try {
+          await Message.findByIdAndUpdate(messageId, {
+            $set: {
+              paypalOrderId: order.id,
+              pendingPaymentOrderId: order.id,
+              pendingPaymentMethod: 'paypal',
+              pendingPaymentAmount: amountUSD,
+              pendingPaymentCreatedAt: new Date()
+            }
+          });
+          console.log('💾 Stored PayPal order in database for message:', messageId);
+        } catch (err) {
+          console.error('⚠️ Failed to store PayPal order:', err);
+        }
       }
+
+      return res.json({
+        success: true,
+        paymentMethod: 'paypal',
+        orderId: order.id,
+        approvalUrl: order.links.find(link => link.rel === 'approve')?.href,
+        amount: amountUSD,
+        currency: 'USD'
+      });
     }
 
     else {
@@ -2067,6 +2108,128 @@ app.post('/api/cashfree/webhook', async (req, res) => {
   } catch (error) {
     console.error('💥 Webhook error:', error);
     res.status(500).send('Webhook processing failed');
+  }
+});
+
+// ============================================================
+// NEW: PayPal Webhook Handler
+// ============================================================
+app.post('/api/paypal/webhook', async (req, res) => {
+  try {
+    const webhookData = req.body;
+    console.log('=================================');
+    console.log('📥 PayPal webhook received');
+    console.log('=================================');
+    console.log('Event Type:', webhookData.event_type);
+    console.log('Resource ID:', webhookData.resource?.id);
+    console.log('---------------------------------');
+
+    // Handle CHECKOUT.ORDER.COMPLETED event
+    if (webhookData.event_type === 'CHECKOUT.ORDER.COMPLETED') {
+      const orderId = webhookData.resource?.id;
+      console.log('✅ Order completed event:', orderId);
+
+      try {
+        // Find message by PayPal order ID
+        const message = await Message.findOne({
+          paypalOrderId: orderId
+        });
+
+        if (!message) {
+          console.log('⚠️ No message found for PayPal order:', orderId);
+          return res.status(200).json({ success: true, warning: 'Order not tracked locally' });
+        }
+
+        console.log('✅ Found message:', message._id);
+
+        // Capture the payment
+        console.log('💰 Capturing payment...');
+        const captureData = await capturePayPalPayment(orderId);
+
+        if (captureData.status === 'COMPLETED') {
+          const captures = captureData.purchase_units?.[0]?.payments?.captures?.[0] || {};
+          const capturedAmount = captures.amount?.value || 0;
+
+          // Update message with payment confirmation
+          message.paymentStatus = 'paid';
+          message.paymentMethod = 'paypal';
+          message.paymentId = captureData.id;
+          message.amountPaid = parseFloat(capturedAmount);
+          message.paidAt = new Date();
+
+          // Clear pending data
+          message.pendingPaymentOrderId = undefined;
+          message.pendingPaymentMethod = undefined;
+          message.pendingPaymentAmount = undefined;
+          message.pendingPaymentCreatedAt = undefined;
+
+          await message.save();
+
+          console.log('✅ PayPal payment confirmed for message:', message._id);
+          console.log('   Amount:', capturedAmount);
+          console.log('   Capture ID:', captureData.id);
+
+          // Emit socket event for real-time update
+          io.emit('paymentReceived', {
+            messageId: message._id.toString(),
+            amount: capturedAmount,
+            paymentId: captureData.id,
+            method: 'paypal'
+          });
+
+          return res.status(200).json({ success: true, message: 'Payment processed successfully' });
+        } else {
+          console.error('❌ Capture failed with status:', captureData.status);
+          return res.status(200).json({ success: false, error: 'Capture failed' });
+        }
+      } catch (captureError) {
+        console.error('❌ Failed to capture payment:', captureError.message);
+        return res.status(200).json({ success: false, error: captureError.message });
+      }
+    }
+
+    // Handle PAYMENT.CAPTURE.COMPLETED event
+    else if (webhookData.event_type === 'PAYMENT.CAPTURE.COMPLETED') {
+      const captureId = webhookData.resource?.id;
+      console.log('✅ Payment capture completed:', captureId);
+
+      try {
+        const message = await Message.findOne({
+          paymentId: captureId
+        });
+
+        if (message) {
+          message.paymentStatus = 'paid';
+          await message.save();
+          console.log('✅ Payment status confirmed for message:', message._id);
+        }
+      } catch (error) {
+        console.error('⚠️ Error processing capture event:', error.message);
+      }
+
+      return res.status(200).json({ success: true });
+    }
+
+    // Handle CHECKOUT.ORDER.APPROVED event
+    else if (webhookData.event_type === 'CHECKOUT.ORDER.APPROVED') {
+      const orderId = webhookData.resource?.id;
+      console.log('✅ Order approved:', orderId);
+      return res.status(200).json({ success: true });
+    }
+
+    // Unknown event type
+    else {
+      console.log('⚠️ Unknown PayPal event type:', webhookData.event_type);
+      return res.status(200).json({ success: true, message: 'Event acknowledged' });
+    }
+
+  } catch (error) {
+    console.error('💥 PayPal webhook error:', error);
+    res.status(200).json({
+      success: false,
+      error: error.message,
+      note: 'Webhook received but processing failed'
+    });
   }
 });
 
