@@ -595,6 +595,7 @@ const messageSchema = new mongoose.Schema({
   paymentId: String,
   amountPaid: Number,
   paidAt: Date,
+  paypalOrderId: String,
   chatMessages: [chatMessageSchema],
   meetingLinks: meetingLinksSchema,
   callNotificationSent: {
@@ -1975,40 +1976,76 @@ app.post('/api/verify-payment', async (req, res) => {
       }
     }
 
-    // PayPal Payment - FIXED
-    if (paymentMethod === 'paypal') {
-      console.log('💙 Processing PayPal payment...');
-      const amountUSD = (amount / 83).toFixed(2);
-      const order = await createPayPalOrder(parseFloat(amountUSD), 'USD', messageId);
+    // PayPal Verification - FIXED
+    else if (paymentMethod === 'paypal') {
+      try {
+        console.log('🔍 Capturing PayPal payment...');
+        const captureData = await capturePayPalPayment(orderId);
 
-      console.log('✅ PayPal order created:', order.id);
+        console.log('✅ PayPal capture response:', captureData.status);
 
-      // ✅ FIX: Store PayPal order in database
-      if (messageId) {
-        try {
-          await Message.findByIdAndUpdate(messageId, {
-            $set: {
-              paypalOrderId: order.id,
-              pendingPaymentOrderId: order.id,
-              pendingPaymentMethod: 'paypal',
-              pendingPaymentAmount: amountUSD,
-              pendingPaymentCreatedAt: new Date()
+        if (captureData.status === 'COMPLETED') {
+          // ✅ FIX: Update message with payment confirmation
+          if (messageId) {
+            try {
+              const captures = captureData.purchase_units?.[0]?.payments?.captures?.[0] || {};
+              const capturedAmount = captures.amount?.value || 0;
+
+              console.log('💾 Updating message record with payment confirmation...');
+
+              await Message.findByIdAndUpdate(messageId, {
+                $set: {
+                  paymentStatus: 'paid',
+                  paymentMethod: 'paypal',
+                  paymentId: captureData.id,
+                  amountPaid: parseFloat(capturedAmount),
+                  paidAt: new Date(),
+                  paypalOrderId: orderId
+                },
+                $unset: {
+                  pendingPaymentOrderId: 1,
+                  pendingPaymentMethod: 1,
+                  pendingPaymentAmount: 1,
+                  pendingPaymentCreatedAt: 1
+                }
+              });
+
+              console.log('✅ Payment confirmed in database for message:', messageId);
+
+              // ✅ EMIT REAL-TIME EVENT
+              io.emit('paymentReceived', {
+                messageId: messageId,
+                amount: capturedAmount,
+                paymentId: captureData.id,
+                method: 'paypal'
+              });
+            } catch (dbErr) {
+              console.error('⚠️ Failed to update payment in database:', dbErr);
             }
-          });
-          console.log('💾 Stored PayPal order in database for message:', messageId);
-        } catch (err) {
-          console.error('⚠️ Failed to store PayPal order:', err);
-        }
-      }
+          }
 
-      return res.json({
-        success: true,
-        paymentMethod: 'paypal',
-        orderId: order.id,
-        approvalUrl: order.links.find(link => link.rel === 'approve')?.href,
-        amount: amountUSD,
-        currency: 'USD'
-      });
+          return res.json({
+            success: true,
+            message: 'PayPal payment verified successfully',
+            captureId: captureData.id,
+            transactionId: captureData.id,
+            amount: captureData.purchase_units?.[0]?.payments?.captures?.[0]?.amount?.value
+          });
+        } else {
+          console.log('❌ PayPal capture failed with status:', captureData.status);
+          return res.status(400).json({
+            success: false,
+            error: 'PayPal payment capture failed',
+            status: captureData.status
+          });
+        }
+      } catch (error) {
+        console.error('💥 PayPal capture error:', error.message);
+        return res.status(500).json({
+          success: false,
+          error: error.message || 'Failed to capture PayPal payment'
+        });
+      }
     }
 
     else {
