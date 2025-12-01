@@ -28,12 +28,6 @@ require('dotenv').config();
 const app = express();
 const server = http.createServer(app);
 
-app.use(express.static('public'));
-// Serve the delete account page
-app.get('/delete-account', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'delete-account.html'));
-});
-
 // Validate critical environment variables
 if (process.env.NODE_ENV === 'production') {
   if (!process.env.MONGODB_URI) {
@@ -181,6 +175,34 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+// ============================================
+// SERVE STATIC FILES - MUST BE BEFORE ROUTES
+// ============================================
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ============================================
+// PUBLIC ROUTES (NO AUTHENTICATION REQUIRED)
+// ============================================
+
+// Serve delete account page (MUST be public and defined early)
+app.get('/delete-account', (req, res) => {
+  const filePath = path.join(__dirname, 'public', 'delete-account.html');
+
+  console.log('📄 Serving delete-account page from:', filePath);
+  console.log('   File exists:', fs.existsSync(filePath));
+
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    console.error('❌ File not found:', filePath);
+    res.status(404).send(`
+      <h1>Delete Account Page Not Found</h1>
+      <p>Expected location: ${filePath}</p>
+      <p>Please contact support.</p>
+    `);
+  }
+});
+
 app.use('/uploads', express.static(uploadsDir));
 
 // Socket.IO with CORS
